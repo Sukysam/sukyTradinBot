@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(claude mcp *)",
+      "Bash(npm ls *)",
+      "Bash(command -v npm)",
+      "Bash(command -v npx)",
+      "Read(//Users/sam/**)",
+      "Bash(npx -y @anthropic-ai/claude-code --version)",
+      "Bash(npx -y @anthropic-ai/claude-code mcp add --transport sse --scope user trader-dev https://mcp.trader.dev/sse)",
+      "Bash(npx -y @anthropic-ai/claude-code mcp list)",
+      "Bash(npx -y @anthropic-ai/claude-code mcp add --help)"
+    ]
+  }
+}
