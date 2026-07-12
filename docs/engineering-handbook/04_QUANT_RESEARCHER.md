@@ -32,8 +32,10 @@ the SHAP explainer that makes that model's decisions auditable.
   wired to the HMM or any other consumer — see [ADR-003](Architecture/ADR/ADR-003-Feature-Engineering.md).
   Milestone 4 re-points `hmm_engine.py` at this pipeline instead of
   `data/feature_engineering.py` directly. `FeatureVector` is now a frozen
-  contract ([ADR-004](Architecture/ADR/ADR-004-FeatureVector-Contract-Freeze.md),
-  binding spec: [Standards/FeatureVector Contract.md](Standards/FeatureVector%20Contract.md))
+  contract, currently v2 ([ADR-004](Architecture/ADR/ADR-004-FeatureVector-Contract-Freeze.md),
+  [ADR-005](Architecture/ADR/ADR-005-FeatureVector-Provenance.md) added
+  `provenance` for reproducibility/traceability; binding spec:
+  [Standards/FeatureVector Contract.md](Standards/FeatureVector%20Contract.md))
   — read it before wiring any consumer to this pipeline.
 - `backtest/` — SMA-crossover backtester (`sma_crossover.py`,
   `optimize_sma.py`) against Binance klines. Unrelated crypto sandbox, no

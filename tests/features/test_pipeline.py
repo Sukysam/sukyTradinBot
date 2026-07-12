@@ -46,11 +46,43 @@ class TestCompute:
         vec = pipeline.compute(daily_bars, "TEST", feature_names=["atr_14", "rsi_14"])
         assert set(vec.feature_names) == {"atr_14", "rsi_14"}
 
-    def test_metadata_records_source_and_bar_count(self, daily_bars: list[Bar]) -> None:
+    def test_metadata_records_bar_count(self, daily_bars: list[Bar]) -> None:
         pipeline = FeaturePipeline()
-        vec = pipeline.compute(daily_bars, "TEST", source="historical")
-        assert vec.metadata["source"] == "historical"
+        vec = pipeline.compute(daily_bars, "TEST")
         assert vec.metadata["n_bars_used"] == len(daily_bars)
+
+    def test_provenance_records_source_dataset(self, daily_bars: list[Bar]) -> None:
+        pipeline = FeaturePipeline()
+        vec = pipeline.compute(daily_bars, "TEST", source_dataset="historical")
+        assert vec.provenance.source_dataset == "historical"
+
+    def test_provenance_defaults_source_dataset_to_unspecified(self, daily_bars: list[Bar]) -> None:
+        pipeline = FeaturePipeline()
+        vec = pipeline.compute(daily_bars, "TEST")
+        assert vec.provenance.source_dataset == "unspecified"
+
+    def test_provenance_records_pipeline_and_manifest_version(self, daily_bars: list[Bar]) -> None:
+        from features.manifest import MANIFEST_SCHEMA_VERSION
+        from features.pipeline import PIPELINE_VERSION
+
+        pipeline = FeaturePipeline()
+        vec = pipeline.compute(daily_bars, "TEST")
+        assert vec.provenance.pipeline_version == PIPELINE_VERSION
+        assert vec.provenance.manifest_version == MANIFEST_SCHEMA_VERSION
+
+    def test_provenance_feature_versions_cover_every_feature_in_the_vector(
+        self, daily_bars: list[Bar]
+    ) -> None:
+        pipeline = FeaturePipeline()
+        vec = pipeline.compute(daily_bars, "TEST", feature_names=["atr_14", "rsi_14"])
+        assert set(vec.provenance.feature_versions) == {"atr_14", "rsi_14"}
+
+    def test_provenance_generated_at_is_utc_and_recent(self, daily_bars: list[Bar]) -> None:
+        pipeline = FeaturePipeline()
+        before = datetime.now(UTC)
+        vec = pipeline.compute(daily_bars, "TEST")
+        after = datetime.now(UTC)
+        assert before <= vec.provenance.generated_at <= after
 
 
 class TestComputeSeries:
@@ -78,6 +110,20 @@ class TestComputeSeries:
         vectors, _ = pipeline.compute_series(shuffled, "TEST")
         timestamps = [v.timestamp for v in vectors]
         assert timestamps == sorted(timestamps)
+
+    def test_every_vector_in_one_call_shares_generated_at(self, daily_bars: list[Bar]) -> None:
+        pipeline = FeaturePipeline()
+        vectors, _ = pipeline.compute_series(daily_bars, "TEST")
+        generated_at_values = {v.provenance.generated_at for v in vectors}
+        assert len(generated_at_values) == 1
+
+    def test_injected_clock_controls_generated_at(self, daily_bars: list[Bar]) -> None:
+        from common.time import FixedClock
+
+        fixed_instant = datetime(2030, 1, 1, tzinfo=UTC)
+        pipeline = FeaturePipeline(clock=FixedClock(fixed_instant))
+        vectors, _ = pipeline.compute_series(daily_bars, "TEST")
+        assert all(v.provenance.generated_at == fixed_instant for v in vectors)
 
 
 class TestDiagnostics:

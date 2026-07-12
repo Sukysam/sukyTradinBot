@@ -28,7 +28,7 @@ from features import (  # noqa: F401
     volume,
 )
 from features.errors import FeatureComputationError, FeatureError, InsufficientHistoryError
-from features.feature_vector import FeatureVector
+from features.feature_vector import FeatureVector, Provenance
 from features.pipeline import PIPELINE_VERSION, FeaturePipeline, PipelineDiagnostics
 from features.registry import (
     DEFAULT_REGISTRY,
@@ -52,6 +52,7 @@ __all__ = [
     "FeatureVector",
     "InsufficientHistoryError",
     "PipelineDiagnostics",
+    "Provenance",
     "__version__",
     "feature",
 ]

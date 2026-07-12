@@ -77,7 +77,7 @@ anyone should look to answer "is X actually built yet."
 | Event-Driven Execution | **Implemented** | [01 System Architect](01_SYSTEM_ARCHITECT.md) / [03 Backend Engineer](03_BACKEND_ENGINEER.md) | `main.py` (structural + news pipelines), `broker/news_streamer.py` |
 | Market Data Platform | **Implemented** (historical + streaming, Parquet/DuckDB storage, validation, replay) | [03 Backend Engineer](03_BACKEND_ENGINEER.md) | `src/market_data/` — see [ADR-002](Architecture/ADR/ADR-002-Market-Data.md) |
 | Alpaca Broker Integration | **Implemented** — order execution and historical data client both built | [03 Backend Engineer](03_BACKEND_ENGINEER.md) | `broker/order_executor.py`; `broker/alpaca_client.py` (adapter over `src/market_data`) |
-| Feature Engineering Platform | **Implemented** (39-feature causal registry, `FeaturePipeline`, `FeatureVector`, manifest); `FeatureVector` contract frozen; not yet wired to any consumer | [04 Quant Researcher](04_QUANT_RESEARCHER.md) | `src/features/` — see [ADR-003](Architecture/ADR/ADR-003-Feature-Engineering.md) and [ADR-004](Architecture/ADR/ADR-004-FeatureVector-Contract-Freeze.md) (contract freeze; binding spec: [Standards/FeatureVector Contract.md](Standards/FeatureVector%20Contract.md)). `regime-trader/data/feature_engineering.py` remains the live path until Milestone 4 re-points the HMM at this pipeline. |
+| Feature Engineering Platform | **Implemented** (39-feature causal registry, `FeaturePipeline`, `FeatureVector`, manifest); `FeatureVector` contract frozen at v2 (with `provenance`); not yet wired to any consumer | [04 Quant Researcher](04_QUANT_RESEARCHER.md) | `src/features/` — see [ADR-003](Architecture/ADR/ADR-003-Feature-Engineering.md), [ADR-004](Architecture/ADR/ADR-004-FeatureVector-Contract-Freeze.md) (contract freeze), and [ADR-005](Architecture/ADR/ADR-005-FeatureVector-Provenance.md) (provenance, v1→v2); binding spec: [Standards/FeatureVector Contract.md](Standards/FeatureVector%20Contract.md). `regime-trader/data/feature_engineering.py` remains the live path until Milestone 4 re-points the HMM at this pipeline. |
 | Backtesting Framework | **Implemented** (crypto SMA baseline); **planned** (regime-aware equity backtester) | [04 Quant Researcher](04_QUANT_RESEARCHER.md) | `backtest/` |
 | Risk Management & Circuit Breakers | **Implemented** | [08 Risk Manager](08_RISK_MANAGER.md) | `core/risk_manager.py` |
 | Production Deployment | **Implemented** (process lifecycle); **planned** (orchestration, model serving, drift monitoring) | [12 DevOps Engineer](12_DEVOPS_ENGINEER.md) | `main.py` lifecycle; see [Architecture/Production Deployment.md](Architecture/Production%20Deployment.md) |
@@ -160,10 +160,11 @@ without updating every such reference.
    `ALPACA_PAPER=false` or trading real capital outside of
    [SOPs/Release Workflow.md](SOPs/Release%20Workflow.md)'s explicit gate.
 9. **The `FeatureVector` contract is frozen — extend it, never silently
-   change it.** Required fields, metadata keys, feature-ordering
-   guarantees, and versioning rules are binding as of
-   [ADR-004](Architecture/ADR/ADR-004-FeatureVector-Contract-Freeze.md);
-   full detail in
+   change it.** Required fields, metadata keys, provenance, feature-
+   ordering guarantees, and versioning rules are binding as of
+   [ADR-004](Architecture/ADR/ADR-004-FeatureVector-Contract-Freeze.md)
+   and [ADR-005](Architecture/ADR/ADR-005-FeatureVector-Provenance.md)
+   (currently contract v2); full detail in
    [Standards/FeatureVector Contract.md](Standards/FeatureVector%20Contract.md).
    A breaking change requires a `PIPELINE_VERSION` bump and a new ADR, not
    an in-place redefinition — every consumer (HMM, backtesting, adaptive
