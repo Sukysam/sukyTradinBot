@@ -8,6 +8,22 @@ An ADR exists so that months from now, when someone asks "why did we do
 it this way," the answer is a document, not a half-remembered Slack
 thread or a git-blame archaeology session.
 
+## Index
+
+One or two sentences per ADR — enough to know whether it's the one you
+need before opening it. Update this table in the same change that adds a
+new ADR or changes an existing one's status.
+
+| ADR | Status | Summary |
+|---|---|---|
+| [001 — Foundation](ADR-001-Foundation.md) | Accepted | Milestone 1's foundational choices: `Protocol`-based interfaces, Pydantic settings, strict MyPy, dependency injection, the `trading` extras group, and why `regime-trader/` was deliberately left untouched. |
+| [002 — Market Data](ADR-002-Market-Data.md) | Accepted | Milestone 2: a new, independently-tooled `src/market_data` package (not `regime-trader/broker/`), provider-agnostic models behind `Protocol` interfaces, Parquet+DuckDB storage, and a thin adapter bridging `market_data` into `regime-trader/`'s existing contract. |
+| [003 — Feature Engineering](ADR-003-Feature-Engineering.md) | Accepted | Milestone 3: the canonical `FeatureVector` output every consumer is meant to share, registration-time look-ahead protection for every feature, reuse of `market_data.validation` for bar cleaning, causal swing-point detection, and a generated-but-checked-in feature manifest. |
+| [004 — FeatureVector Contract Freeze](ADR-004-FeatureVector-Contract-Freeze.md) | Accepted | Freezes `FeatureVector` as a stable, versioned interface ahead of Milestone 4 — required fields, ordering guarantees, and a backward-compatibility policy, so future changes are additive or explicitly versioned, never silent. |
+| [005 — FeatureVector Provenance](ADR-005-FeatureVector-Provenance.md) | Accepted | Adds a required `provenance` field to `FeatureVector` (pipeline/manifest/feature versions, generation time, source dataset) for reproducibility and training/inference consistency checks — bumps the contract to v2. |
+| [006 — RegimeState Contract](ADR-006-RegimeState-Contract.md) | Accepted | Freezes `RegimeState` — the HMM's only output type — as a stable interface ahead of Milestone 5, before any real consumer exists. |
+| [007 — HMM Design](ADR-007-HMM-Design.md) | Accepted | Milestone 4's modeling and engineering decisions: porting the causal Forward Algorithm/BIC selection from `regime-trader/core/hmm_engine.py`, explicit missing-value handling, always computing both BIC and AIC, filesystem persistence, hard-fail feature-version drift detection at inference, and what's deliberately deferred (incremental live inference, `main.py.ModelStore` wiring). |
+
 ## When to write one
 
 Write an ADR for a decision that is:
