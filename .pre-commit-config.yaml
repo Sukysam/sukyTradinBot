@@ -1,0 +1,41 @@
+# Foundation-scoped pre-commit hooks (Milestone 1). Ruff/Black/MyPy are
+# scoped to src/ and tests/ only — see the tooling-scope note in
+# docs/engineering-handbook/Architecture/Known Gaps.md for why
+# regime-trader/ and backtest/ aren't yet under this pipeline.
+
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+        args: ["--maxkb=1024"]
+      - id: check-merge-conflict
+      - id: detect-private-key
+      - id: mixed-line-ending
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.4.10
+    hooks:
+      - id: ruff
+        args: ["--fix"]
+        files: ^(src|tests)/
+
+  - repo: https://github.com/psf/black
+    rev: 24.4.2
+    hooks:
+      - id: black
+        files: ^(src|tests)/
+
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v1.10.0
+    hooks:
+      - id: mypy
+        files: ^src/
+        additional_dependencies:
+          - pydantic>=2.5
+          - pydantic-settings>=2.1
+          - types-PyYAML

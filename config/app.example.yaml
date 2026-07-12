@@ -1,0 +1,17 @@
+# Example non-secret application configuration, loaded via
+# common.config.load_yaml_config(). Copy to config/app.yaml to use it, or
+# leave absent — a missing file is a valid "use defaults" state (see
+# load_yaml_config's docstring).
+#
+# Secrets never belong in this file — see .env.example and
+# docs/engineering-handbook/Standards/Coding Standards.md's "Security &
+# secrets" section. This file is for non-secret, structured settings that
+# are awkward to express as a single environment variable.
+#
+# This is deliberately generic. It is NOT config/settings.yaml — the
+# trading-specific ticker list and sector mapping tracked as
+# docs/engineering-handbook/Architecture/Known Gaps.md item 1, which
+# remains unbuilt and out of scope for this milestone.
+
+app_name: regime-trader
+log_level: INFO

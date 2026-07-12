@@ -162,6 +162,12 @@ without updating every such reference.
 
 ```
 sukyTradinBot/
+├── src/common/                    foundation package (Milestone 1): config, structured
+│                                   logging, base interfaces, common utilities — no
+│                                   trading logic; see the tooling-scope note in
+│                                   Architecture/Known Gaps.md
+├── tests/common/                  tests for src/common
+│
 ├── regime-trader/                 the production trading platform
 │   ├── main.py                    orchestration: three concurrent pipelines under one asyncio loop
 │   ├── core/                      HMM engine, risk manager, sentiment engine, learning engine
@@ -182,6 +188,15 @@ sukyTradinBot/
 │       ├── Standards/             detailed coding/testing/documentation/risk standards
 │       ├── Architecture/          system design, data flow, known gaps
 │       └── _archive/              superseded documentation, kept for historical reference only
+│
+├── config/                        non-secret app config (*.example.* checked in; real
+│                                   files gitignored) — not config/settings.yaml, the
+│                                   still-unbuilt trading config in Known Gaps item 1
+├── .github/workflows/             CI (foundation-scoped — see tooling-scope note)
+├── pyproject.toml                 packaging, dependency groups, ruff/black/mypy/pytest config
+├── Dockerfile, docker-compose.yml foundation-only container image (see Dockerfile header)
+├── .pre-commit-config.yaml        local pre-commit hooks (foundation-scoped)
+├── .env.example                   documents expected environment variables; real .env is gitignored
 │
 └── .claude/                       Claude Code session configuration
 ```

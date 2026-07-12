@@ -92,6 +92,41 @@ Items 5 and 6 are not `Protocol`-wired dependencies of `main.py` — they are
 downstream capabilities that simply don't exist as modules yet. Their
 "not implemented" state is tracked here, not via a runtime placeholder.
 
+## Tooling scope (Milestone 1: Foundation)
+
+Milestone 1 added real packaging and tooling — `pyproject.toml`, Ruff,
+Black, MyPy, Pytest, pre-commit, GitHub Actions CI, and a Docker/Compose
+setup — but scoped all of it to the new `src/common/` foundation package
+and `tests/`, deliberately excluding `regime-trader/` and `backtest/`.
+This is a gap, not an oversight, and is tracked here so it doesn't quietly
+become permanent:
+
+- **Why excluded**: Milestone 1's explicit brief was "no trading logic" —
+  reformatting or lint-fixing `regime-trader/`'s existing files, even
+  mechanically, was treated as touching trading code and out of scope.
+  Running strict tooling against code that predates it and can't be
+  brought into compliance in the same change would also have produced a
+  red CI/pre-commit state on day one, which is worse than no coverage.
+- **What this means today**: `ruff check`, `black --check`, `mypy`, and
+  the GitHub Actions `lint`/`typecheck`/`test` jobs only look at `src/`
+  and `tests/`. A change to `regime-trader/` or `backtest/` today gets no
+  automated lint/format/type coverage, and pre-commit's Ruff/Black/MyPy
+  hooks are scoped with `files: ^(src|tests)/` for the same reason.
+- **Owner / next step**: bringing `regime-trader/` and `backtest/` under
+  this same tooling — likely requiring a one-time formatting/lint-fix pass
+  reviewed on its own, separate from any behavioral change — is future
+  work, not yet assigned to a specific build-order item above. Whoever
+  picks it up should update this note and
+  [02_TECHNICAL_PLANNER.md](../02_TECHNICAL_PLANNER.md)'s build order
+  rather than silently expanding tool scope in an unrelated PR.
+- **Dependency separation**: `pyproject.toml` declares `regime-trader/`'s
+  runtime dependencies (pandas, numpy, scipy, hmmlearn, torch,
+  transformers, ta, alpaca-py) under the optional `trading` extra rather
+  than as base dependencies of `src/common`, since `common` imports none
+  of them — installing the foundation package alone (`pip install -e .`
+  or `pip install -e ".[dev]"`) never pulls in trading-platform
+  dependencies.
+
 ## Resolved gaps
 
 *(none yet — move an entry here, with the PR/date and a link to the

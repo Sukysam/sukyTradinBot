@@ -1,0 +1,18 @@
+# Foundation-only compose file (Milestone 1). One service, running the
+# `common` package's smoke-test entrypoint. No broker, database, or
+# trading-related service is defined here yet — see Dockerfile's header
+# comment and docs/engineering-handbook/Architecture/Known Gaps.md.
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      ENVIRONMENT: ${ENVIRONMENT:-development}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      LOG_FORMAT: ${LOG_FORMAT:-json}
+    restart: "no"
