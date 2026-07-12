@@ -130,3 +130,20 @@ def test_provenance_is_frozen() -> None:
     prov = _provenance()
     with pytest.raises(FrozenInstanceError):
         prov.source_dataset = "other"  # type: ignore[misc]
+
+
+def test_provenance_round_trips_through_dict() -> None:
+    prov = _provenance()
+    assert Provenance.from_dict(prov.to_dict()) == prov
+
+
+def test_vector_round_trips_through_dict() -> None:
+    vec = _vector(metadata={"n_bars_used": 10}, quality_flags={"a": True})
+    assert FeatureVector.from_dict(vec.to_dict()) == vec
+
+
+def test_vector_to_dict_is_json_serializable() -> None:
+    import json
+
+    vec = _vector()
+    json.dumps(vec.to_dict())

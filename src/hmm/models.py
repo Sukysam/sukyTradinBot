@@ -69,6 +69,36 @@ class RegimeState:
                 f"transition_probability must be in [0, 1], got {self.transition_probability}"
             )
 
+    def to_dict(self) -> dict[str, Any]:
+        """The full contract, JSON-serializable. `metadata` is copied
+        shallowly, not deep-converted -- a tuple value (e.g.
+        `regime_probabilities`) round-trips through JSON as a list, the
+        same way `ModelMetadata.feature_versions` already does.
+        """
+        return {
+            "timestamp": self.timestamp.isoformat(),
+            "symbol": self.symbol,
+            "regime_id": self.regime_id,
+            "confidence": self.confidence,
+            "transition_probability": self.transition_probability,
+            "model_version": self.model_version,
+            "feature_pipeline_version": self.feature_pipeline_version,
+            "metadata": dict(self.metadata),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> RegimeState:
+        return cls(
+            timestamp=datetime.fromisoformat(data["timestamp"]),
+            symbol=data["symbol"],
+            regime_id=data["regime_id"],
+            confidence=data["confidence"],
+            transition_probability=data["transition_probability"],
+            model_version=data["model_version"],
+            feature_pipeline_version=data["feature_pipeline_version"],
+            metadata=dict(data["metadata"]),
+        )
+
 
 @dataclass(frozen=True)
 class TrainedModel:

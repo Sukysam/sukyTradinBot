@@ -87,6 +87,12 @@ hmm = [
     "scipy>=1.11",
     "hmmlearn>=0.3",
 ]
+# `src/strategy` (Milestone 5) deliberately has no extras group of its
+# own: it depends only on `features.feature_vector` and `hmm.models` at
+# import time (for the `FeatureVector`/`RegimeState` types) plus `common`
+# -- no direct third-party dependency, so installing `.[dev,features,hmm]`
+# already makes `strategy` importable. See
+# docs/engineering-handbook/Architecture/ADR/ADR-009-Strategy-Engine-Design.md.
 # Runtime dependencies of the pre-existing regime-trader/ and backtest/ code
 # trees, declared here for installability and documentation purposes only —
 # regime-trader/'s own trading logic (core/, broker/ minus the Milestone 2
@@ -105,13 +111,14 @@ trading = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["common*", "market_data*", "features*", "hmm*"]
+include = ["common*", "market_data*", "features*", "hmm*", "strategy*"]
 
 [tool.setuptools.package-data]
 common = ["py.typed"]
 market_data = ["py.typed"]
 features = ["py.typed"]
 hmm = ["py.typed"]
+strategy = ["py.typed"]
 
 # --------------------------------------------------------------------------
 # Ruff (lint + import sort). Scoped to the foundation/market-data packages
@@ -146,7 +153,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["common", "market_data", "features", "hmm"]
+known-first-party = ["common", "market_data", "features", "hmm", "strategy"]
 
 [tool.ruff.format]
 # Formatting is Black's responsibility (see [tool.black] below); Ruff is
@@ -216,7 +223,7 @@ testpaths = ["tests"]
 # Milestone 2 adapter at regime-trader/broker/alpaca_client.py are the only
 # consumer of this today; see tests/regime_trader/.
 pythonpath = ["src", "regime-trader"]
-addopts = "-ra --strict-markers --cov=common --cov=market_data --cov=features --cov=hmm --cov-report=term-missing"
+addopts = "-ra --strict-markers --cov=common --cov=market_data --cov=features --cov=hmm --cov=strategy --cov-report=term-missing"
 markers = [
     "performance: measures wall-clock performance against a milestone's documented targets (slower; see tests/features/test_performance.py and tests/hmm/test_performance.py)",
 ]
@@ -247,7 +254,7 @@ filterwarnings = [
 ]
 
 [tool.coverage.run]
-source = ["src/common", "src/market_data", "src/features", "src/hmm"]
+source = ["src/common", "src/market_data", "src/features", "src/hmm", "src/strategy"]
 branch = true
 
 [tool.coverage.report]

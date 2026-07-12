@@ -13,6 +13,93 @@ Versions are tagged per milestone (`vN-<milestone-name>`), not per
 semantic-versioning release — this project doesn't ship releases in the
 traditional sense yet.
 
+## v0.5 - Strategy Engine (2026-07-12, tag `v0.5-strategy-engine`)
+
+### Added
+- `src/strategy/` — a new, independently packaged platform: the first real
+  consumer of `RegimeState`, converting `RegimeState` (with `FeatureVector`
+  as context) into the canonical `StrategyDecision` (`timestamp`, `symbol`,
+  `strategy_id`, `regime_id`, `allocation`, `confidence`,
+  `expected_holding_period`, `reasoning`, `metadata`). Scoped strictly to
+  selecting a strategy and expressing allocation intent — no capital/
+  liquidity/leverage checks, no order placement, no broker/risk/memory/NLP
+  integration.
+- `strategy.interfaces.Strategy` — a `Protocol` with `supports(regime_id)`
+  and `allocate(feature_vector, regime_state) -> StrategyDecision`.
+- `strategy.registry.StrategyRegistry` — dispatch driven entirely by each
+  registered strategy's own `supports()` method, with no separate
+  `regime_id -> strategy_id` map to drift out of sync; raises
+  `UnsupportedRegimeError` on zero matches (unless a `default_strategy_id`
+  fallback is configured) and `AmbiguousStrategyError` on more than one.
+- `strategy.strategies.{bull,bear,sideways,defensive}` — four reference
+  strategies (`create_growth_strategy`, `create_bear_strategy`,
+  `create_mean_reversion_strategy`, `create_defensive_strategy`) built on
+  a shared `RegimeMappedStrategy`: `allocation = base_allocation *
+  regime_state.confidence`, `confidence = regime_state.confidence`
+  directly. None hardcode which `regime_id` values they apply to —
+  `supported_regime_ids` is always caller-supplied per trained model (see
+  ADR-009 Decision 4).
+- `strategy.service.StrategyService` — the package's single entry point:
+  resolves a strategy via the registry, then calls `allocate`.
+  `StrategyEngineConfig.default_strategy_id` is an explicit opt-in
+  fallback (`None` by default — fails loudly on an unmapped regime until
+  an operator deliberately configures one).
+- `ADR-008-StrategyDecision-Contract.md` and
+  `ADR-009-Strategy-Engine-Design.md` — the `StrategyDecision` contract
+  freeze (landed ahead of this tag, ungoverned by it) and this milestone's
+  implementation decisions: `supports()`-only dispatch, the fallback-vs-
+  direct-dispatch bug found and fixed during smoke testing, the
+  confidence-propagation formula, and caller-supplied `regime_id`
+  semantics; binding spec: `Standards/StrategyDecision Contract.md`.
+- `to_dict`/`from_dict` on `FeatureVector`, `Provenance`, and `RegimeState`
+  (previously only `hmm.models.ModelMetadata` had them) — additive, no
+  contract version bump, added to support this milestone's new
+  `tests/contracts/` requirement.
+- `tests/contracts/` — a new cross-package regression suite (distinct from
+  each package's own unit tests) verifying `FeatureVector`, `RegimeState`,
+  and `StrategyDecision` each have exactly their frozen field set, correct
+  version metadata, lossless `to_dict`/`from_dict` round-trips, and
+  documented backward-compatibility behavior (unknown metadata keys
+  tolerated, invariant violations rejected).
+- 83 new tests: 55 in `tests/strategy` (registry resolution, unsupported-
+  regime/ambiguous-match/fallback-to-default paths, confidence propagation
+  and allocation-bounds across a base×confidence grid, deterministic
+  output, configuration overrides, service dispatch, a dedicated
+  regression test for the fallback-dispatch bug fix) plus 28 in
+  `tests/contracts`.
+- `benchmarks/v0.5-strategy-engine.json` — `StrategyService.decide`
+  latency (~0.0096ms/call over 10,000 trials), comfortably under the
+  milestone's <1ms target and, expectedly, several orders of magnitude
+  cheaper than `hmm.service.RegimeService.infer`'s ~20.9ms (v0.4) since
+  this milestone adds no computation heavier than a dict/set lookup and a
+  multiplication.
+- `common.time.require_utc` consolidation completed: `market_data.models`
+  and `features.feature_vector` now both import the shared helper (already
+  used by `hmm.models` since v0.4) instead of each independently
+  reimplementing the same UTC check.
+
+### Changed
+- Nothing in `regime-trader/` changed — `core/regime_strategies.py` (not
+  yet built there) remains a gap; `src/strategy/` is not yet wired to any
+  consumer.
+
+### Known limitations
+- No tooling exists yet to help an operator determine which `regime_id`
+  is "bull-like" for a freshly trained HMM (e.g. inspecting
+  `GaussianHMM.means_` per fitted component) — `supported_regime_ids` must
+  currently be derived by hand per trained model. See ADR-009 Decision 4.
+- Confidence and allocation are a single linear formula off `RegimeState.
+  confidence` alone — no independent signal (sentiment, bandit confidence)
+  factors in yet; combining future signal sources is an open design
+  question for whichever milestone introduces them, not decided here. See
+  ADR-009 Decision 3.
+- Only exercised against synthetic `FeatureVector`/`RegimeState` pairs
+  constructed directly in tests — not yet run end-to-end against a real
+  `RegimeService.infer` output.
+- No portfolio construction or optimization across multiple symbols —
+  `StrategyService.decide` operates on one `(FeatureVector, RegimeState)`
+  pair at a time, by design (deferred, not an oversight).
+
 ## v0.4 - HMM & Regime Detection (2026-07-12, tag `v0.4-hmm-regime-detection`)
 
 ### Added

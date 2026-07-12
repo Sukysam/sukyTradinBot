@@ -43,15 +43,27 @@ implemented only for the RL memory loop's bandit — see
 Owner: [05_MEMORY_ENGINEER.md](../05_MEMORY_ENGINEER.md) (refresh cadence),
 [04_QUANT_RESEARCHER.md](../04_QUANT_RESEARCHER.md) (`src/hmm/` itself).
 
-### 4. `core/signal_generator.py` + `core/regime_strategies.py` (Adaptive Strategy Allocation)
+### 4. `core/signal_generator.py` + `core/regime_strategies.py` (Adaptive Strategy Allocation — partially closed by Milestone 5)
 Satisfies `main.py.SignalGenerator`: `evaluate_bar(...)` and
 `evaluate_catalyst(...)`, both returning `Optional[TradeDecision]`. Owns
 the HMM-probabilities → regime tier → allocation logic (Spec Sec. 3), the
 `trade_context_db.json` entry-snapshot write (Spec Sec. 4), and hosts the
 Adaptive Strategy Allocation model per
 [04_QUANT_RESEARCHER.md](../04_QUANT_RESEARCHER.md)'s target architecture.
-The single largest remaining piece of business logic in the system.
-Depends on item 3. Owner: [07_SIGNAL_ORCHESTRATOR.md](../07_SIGNAL_ORCHESTRATOR.md).
+The `regime_strategies.py` half — `RegimeState` → allocation — is now real:
+`src/strategy/` (`StrategyRegistry`, `StrategyService`, four reference
+strategies) closes it, at least as a first phase; see
+[ADR-008](ADR/ADR-008-StrategyDecision-Contract.md) and
+[ADR-009](ADR/ADR-009-Strategy-Engine-Design.md). What remains open: it is
+narrower than the full Adaptive Strategy Allocation model described here —
+no sentiment/bandit-confidence inputs, no SHAP, no `trade_context_db.json`
+write, and not wired to `main.py.SignalGenerator` at all — and
+`core/signal_generator.py`'s own cross-source arbitration role (merging
+strategy output with adaptive-learning confidence and NLP catalysts into
+one `TradeDecision`) is unbuilt, deliberately deferred to Milestone 11
+(Signal Orchestration) per [PROJECT_STATUS.md](../../../PROJECT_STATUS.md)'s
+milestone split. Depends on item 3. Owner:
+[07_SIGNAL_ORCHESTRATOR.md](../07_SIGNAL_ORCHESTRATOR.md).
 
 ### 5. `core/attribution.py` (SHAP Trade Attribution)
 Per-trade feature attribution for the Adaptive Strategy Allocation model.

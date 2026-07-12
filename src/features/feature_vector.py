@@ -24,18 +24,10 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import datetime
 from typing import Any
 
-
-def _require_utc(value: datetime, field_name: str) -> None:
-    if value.tzinfo is None:
-        raise ValueError(f"{field_name} must be timezone-aware, got naive datetime {value!r}")
-    if value.utcoffset() != timezone.utc.utcoffset(None):
-        raise ValueError(
-            f"{field_name} must be normalized to UTC, got offset "
-            f"{value.utcoffset()} for {value!r}"
-        )
+from common.time import require_utc as _require_utc
 
 
 @dataclass(frozen=True)
@@ -70,6 +62,25 @@ class Provenance:
 
     def __post_init__(self) -> None:
         _require_utc(self.generated_at, "generated_at")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "pipeline_version": self.pipeline_version,
+            "manifest_version": self.manifest_version,
+            "feature_versions": dict(self.feature_versions),
+            "generated_at": self.generated_at.isoformat(),
+            "source_dataset": self.source_dataset,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> Provenance:
+        return cls(
+            pipeline_version=data["pipeline_version"],
+            manifest_version=data["manifest_version"],
+            feature_versions=dict(data["feature_versions"]),
+            generated_at=datetime.fromisoformat(data["generated_at"]),
+            source_dataset=data["source_dataset"],
+        )
 
 
 @dataclass(frozen=True)
@@ -143,6 +154,34 @@ class FeatureVector:
     @property
     def has_any_flag(self) -> bool:
         return any(self.quality_flags.values())
+
+    def to_dict(self) -> dict[str, Any]:
+        """The full contract, JSON-serializable -- distinct from
+        `as_dict()`, which returns only `{feature_name: value}`. For
+        logging, persistence, or crossing a process boundary; round-trips
+        exactly via `from_dict`.
+        """
+        return {
+            "timestamp": self.timestamp.isoformat(),
+            "symbol": self.symbol,
+            "feature_values": list(self.feature_values),
+            "feature_names": list(self.feature_names),
+            "metadata": dict(self.metadata),
+            "quality_flags": dict(self.quality_flags),
+            "provenance": self.provenance.to_dict(),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> FeatureVector:
+        return cls(
+            timestamp=datetime.fromisoformat(data["timestamp"]),
+            symbol=data["symbol"],
+            feature_values=tuple(data["feature_values"]),
+            feature_names=tuple(data["feature_names"]),
+            metadata=dict(data["metadata"]),
+            quality_flags=dict(data["quality_flags"]),
+            provenance=Provenance.from_dict(data["provenance"]),
+        )
 
 
 __all__ = ["FeatureVector", "Provenance"]
