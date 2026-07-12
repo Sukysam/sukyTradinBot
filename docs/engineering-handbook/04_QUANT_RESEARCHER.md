@@ -13,6 +13,7 @@ the SHAP explainer that makes that model's decisions auditable.
 | Capability | This role's responsibility |
 |---|---|
 | HMM Regime Detection | Full ownership |
+| Feature Engineering Platform | Full ownership — `src/features/`, see [ADR-003](Architecture/ADR/ADR-003-Feature-Engineering.md) |
 | Backtesting Framework | Full ownership |
 | SHAP Trade Attribution | Build the explainer and the underlying explainable model; integration into the live decision path owned jointly with Signal Orchestrator |
 | Adaptive Strategy Allocation | Builds the statistical/ML model backing the allocation decision; the decision-routing logic itself is owned by Signal Orchestrator |
@@ -24,7 +25,13 @@ the SHAP explainer that makes that model's decisions auditable.
   selection, and the causal `forward_algorithm` / `ForwardFilter` inference
   path.
 - `regime-trader/data/feature_engineering.py` — the feature matrix the HMM
-  is trained and run on.
+  is currently trained and run on, unchanged as of Milestone 3.
+- `src/features/` — the Milestone 3 feature engineering platform: registry-
+  backed causal feature library, `FeaturePipeline`, canonical
+  `FeatureVector` output, and `config/feature_manifest.yaml`. Not yet
+  wired to the HMM or any other consumer — see [ADR-003](Architecture/ADR/ADR-003-Feature-Engineering.md).
+  Milestone 4 re-points `hmm_engine.py` at this pipeline instead of
+  `data/feature_engineering.py` directly.
 - `backtest/` — SMA-crossover backtester (`sma_crossover.py`,
   `optimize_sma.py`) against Binance klines. Unrelated crypto sandbox, no
   shared imports with `regime-trader/`.

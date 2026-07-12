@@ -32,6 +32,9 @@ config/*.yaml
 config/*.yml
 !config/*.example.yaml
 !config/*.example.yml
+# Generated but checked-in: regenerate via features.manifest.write_manifest
+# and commit alongside any feature change (see manifest.py's docstring).
+!config/feature_manifest.yaml
 
 # Editors / OS
 .DS_Store

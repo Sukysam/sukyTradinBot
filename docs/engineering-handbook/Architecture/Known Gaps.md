@@ -85,7 +85,7 @@ Items 5 and 6 are not `Protocol`-wired dependencies of `main.py` — they are
 downstream capabilities that simply don't exist as modules yet. Their
 "not implemented" state is tracked here, not via a runtime placeholder.
 
-## Tooling scope (Milestone 1: Foundation; updated Milestone 2)
+## Tooling scope (Milestone 1: Foundation; updated Milestone 2, Milestone 3)
 
 Milestone 1 added real packaging and tooling — `pyproject.toml`, Ruff,
 Black, MyPy, Pytest, pre-commit, GitHub Actions CI, and a Docker/Compose
@@ -104,7 +104,9 @@ become permanent:
   the GitHub Actions `lint`/`typecheck`/`test` jobs look at `src/` and
   `tests/`, plus one explicit exception added in Milestone 2:
   `regime-trader/broker/alpaca_client.py` (new code, not pre-existing —
-  see [ADR-002](ADR/ADR-002-Market-Data.md) Decision 5). Every other file
+  see [ADR-002](ADR/ADR-002-Market-Data.md) Decision 5). `src/features/`
+  and `tests/features/` (Milestone 3) fall under the same `src`/`tests`
+  scoping as `src/market_data` — no new exception needed. Every other file
   under `regime-trader/` or `backtest/` still gets no automated
   lint/format/type coverage; pre-commit's Ruff/Black/MyPy hooks are scoped
   with `files: ^(src|tests)/|^regime-trader/broker/alpaca_client\.py$` for
@@ -118,12 +120,17 @@ become permanent:
   rather than silently expanding tool scope in an unrelated PR.
 - **Dependency separation**: `pyproject.toml` declares `regime-trader/`'s
   full runtime dependency set (pandas, numpy, scipy, hmmlearn, torch,
-  transformers, ta, alpaca-py) under the optional `trading` extra, and a
+  transformers, ta, alpaca-py) under the optional `trading` extra, a
   narrower `market-data` extra (pandas, numpy, pyarrow, duckdb, alpaca-py)
   for `src/market_data` specifically — see
-  [ADR-002](ADR/ADR-002-Market-Data.md) Decision 4. Neither is a base
-  dependency of `src/common`; installing the foundation package alone
-  (`pip install -e .` or `pip install -e ".[dev]"`) never pulls in either.
+  [ADR-002](ADR/ADR-002-Market-Data.md) Decision 4 — and a `features`
+  extra (pandas, numpy, ta) for `src/features`, which depends on
+  `market_data.models`/`market_data.validation` at import time but not on
+  `market_data`'s heavier storage/provider dependencies — see
+  [ADR-003](ADR/ADR-003-Feature-Engineering.md). None of `trading`,
+  `market-data`, or `features` is a base dependency of `src/common`;
+  installing the foundation package alone (`pip install -e .` or
+  `pip install -e ".[dev]"`) never pulls in any of them.
 
 ## Resolved gaps
 

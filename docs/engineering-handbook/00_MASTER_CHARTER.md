@@ -77,6 +77,7 @@ anyone should look to answer "is X actually built yet."
 | Event-Driven Execution | **Implemented** | [01 System Architect](01_SYSTEM_ARCHITECT.md) / [03 Backend Engineer](03_BACKEND_ENGINEER.md) | `main.py` (structural + news pipelines), `broker/news_streamer.py` |
 | Market Data Platform | **Implemented** (historical + streaming, Parquet/DuckDB storage, validation, replay) | [03 Backend Engineer](03_BACKEND_ENGINEER.md) | `src/market_data/` — see [ADR-002](Architecture/ADR/ADR-002-Market-Data.md) |
 | Alpaca Broker Integration | **Implemented** — order execution and historical data client both built | [03 Backend Engineer](03_BACKEND_ENGINEER.md) | `broker/order_executor.py`; `broker/alpaca_client.py` (adapter over `src/market_data`) |
+| Feature Engineering Platform | **Implemented** (39-feature causal registry, `FeaturePipeline`, `FeatureVector`, manifest); not yet wired to any consumer | [04 Quant Researcher](04_QUANT_RESEARCHER.md) | `src/features/` — see [ADR-003](Architecture/ADR/ADR-003-Feature-Engineering.md). `regime-trader/data/feature_engineering.py` remains the live path until Milestone 4 re-points the HMM at this pipeline. |
 | Backtesting Framework | **Implemented** (crypto SMA baseline); **planned** (regime-aware equity backtester) | [04 Quant Researcher](04_QUANT_RESEARCHER.md) | `backtest/` |
 | Risk Management & Circuit Breakers | **Implemented** | [08 Risk Manager](08_RISK_MANAGER.md) | `core/risk_manager.py` |
 | Production Deployment | **Implemented** (process lifecycle); **planned** (orchestration, model serving, drift monitoring) | [12 DevOps Engineer](12_DEVOPS_ENGINEER.md) | `main.py` lifecycle; see [Architecture/Production Deployment.md](Architecture/Production%20Deployment.md) |
@@ -171,8 +172,16 @@ sukyTradinBot/
 │                                   models/interfaces, Alpaca historical + streaming
 │                                   providers, Parquet/DuckDB storage, validation, replay
 │                                   harness — see Architecture/ADR/ADR-002-Market-Data.md
+├── src/features/                  feature engineering platform (Milestone 3): registry-backed
+│                                   causal feature library (price/volatility/trend/volume/
+│                                   market-structure/statistical/regime), FeaturePipeline,
+│                                   canonical FeatureVector output, machine-readable manifest
+│                                   at config/feature_manifest.yaml — depends on
+│                                   src/market_data for bar cleaning/validation reuse, not the
+│                                   reverse; see Architecture/ADR/ADR-003-Feature-Engineering.md
 ├── tests/common/                  tests for src/common
 ├── tests/market_data/             tests for src/market_data
+├── tests/features/                tests for src/features
 ├── tests/regime_trader/           contract tests for the regime-trader/ <-> src/market_data
 │                                   adapter (see below) — the one exception to "tests/
 │                                   mirrors src/", since regime-trader/ isn't a package

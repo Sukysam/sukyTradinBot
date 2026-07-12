@@ -13,6 +13,71 @@ Versions are tagged per milestone (`vN-<milestone-name>`), not per
 semantic-versioning release — this project doesn't ship releases in the
 traditional sense yet.
 
+## v0.3 - Feature Engineering Platform (2026-07-12, tag `v0.3-feature-engineering`)
+
+### Added
+- `src/features/` — a new, independently packaged platform: registry-
+  backed causal feature library (39 features across price, volatility,
+  trend, volume, market structure, statistical, and regime categories),
+  `FeaturePipeline` (validation → cleaning → corporate-action adjustment →
+  feature computation → output validation), and a canonical
+  `FeatureVector(timestamp, symbol, feature_values, feature_names,
+  metadata, quality_flags, version)` output type every downstream
+  consumer is meant to read.
+- `FeatureRegistry` / `@feature(...)` decorator — every registered feature
+  enforces `uses_future_data=False` at construction (no opt-out), and a
+  registry-driven perturbation test (`test_no_lookahead_all_features.py`)
+  proves causality automatically for every feature without a per-feature
+  test being hand-written.
+- `config/feature_manifest.yaml` — a generated-but-checked-in, machine-
+  readable feature catalog (name, category, version, lookback, dtype,
+  description, `uses_future_data`, `depends_on`), regenerated from the
+  registry via `features.manifest.write_manifest` and kept fresh by a
+  dedicated test.
+- `features` extras group in `pyproject.toml` (pandas, numpy, ta),
+  depending on `market_data.models`/`market_data.validation` at import
+  time but not on `market_data`'s heavier storage/provider dependencies.
+- `ADR-003-Feature-Engineering.md` — key decisions: canonical
+  `FeatureVector`, registration-time leakage protection, reuse of
+  `market_data.validation` rather than re-implementing bar cleaning,
+  confirmed/lagged reporting for market-structure signals, the manifest,
+  and what was deliberately deferred (cross-symbol correlation, `main.py`
+  wiring).
+- 199 tests for `src/features`, covering per-category correctness,
+  registry/`FeatureVector` contract behavior, the pipeline, output
+  validation, the manifest, the explicit Milestone 3 edge-case checklist
+  (NaNs, missing bars, duplicate timestamps, timezone/DST transitions,
+  stock splits, insufficient history, constant prices, extreme
+  volatility), and measured performance against the milestone's targets.
+
+### Changed
+- Nothing in `regime-trader/` changed — `data/feature_engineering.py`
+  remains the live feature path for the existing HMM; `src/features` is
+  not yet wired to any consumer (deliberate, per this milestone's scope —
+  see Milestone 4).
+
+### Known limitations
+- Only exercised against a deterministic synthetic bar generator
+  (`tests/features/conftest.py::make_bars`) — no feature in this registry
+  has yet been run against real historical or live data pulled through
+  `market_data`'s Alpaca providers.
+- `hurst_exponent_100` is, by a wide margin, the most computationally
+  expensive feature in the registry (~2.6s for a 21-trading-day, 1-minute-
+  bar run) and is excluded from the platform's recommended 1-minute-bar
+  feature subset on conventional-use grounds (a 100-bar window covers
+  under two trading hours at that granularity) — see `test_performance.py`
+  and ADR-003's Verification note.
+- The "Regime" category ships two features (`liquidity_proxy_20`,
+  `volatility_clustering_20`), not the originally-scoped cross-symbol
+  "correlation changes" feature — every feature here is a pure function of
+  one symbol's own bar history; a cross-symbol feature needs a design this
+  milestone deliberately didn't make (see ADR-003 Decision 6).
+- Two real bugs in the third-party `ta` library (`ADXIndicator.adx()` and
+  `AverageTrueRange.average_true_range()` both raising an unguarded
+  `IndexError`, not a graceful NaN, below their true minimum input length)
+  were found and worked around with explicit length guards — not fixed
+  upstream.
+
 ## v0.2 - Market Data Platform (2026-07-12, tag `v0.2-market-data`)
 
 ### Added

@@ -1,0 +1,362 @@
+manifest_schema_version: '1'
+feature_count: 39
+features:
+  adx_14:
+    category: trend
+    version: 1
+    lookback: 28
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: Average Directional Index(14), Wilder's smoothing — trend strength, not direction
+  atr_14:
+    category: volatility
+    version: 1
+    lookback: 15
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: Average True Range(14), Wilder's smoothing, raw price units
+  autocorrelation_20:
+    category: statistical
+    version: 1
+    lookback: 21
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: Trailing 20-bar lag-1 autocorrelation of 1-bar log returns
+  breakout_high_20:
+    category: market_structure
+    version: 1
+    lookback: 21
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: 1.0 if close exceeds the prior 20 bars' highest high, else 0.0
+  breakout_low_20:
+    category: market_structure
+    version: 1
+    lookback: 21
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: 1.0 if close falls below the prior 20 bars' lowest low, else 0.0
+  ema_12:
+    category: trend
+    version: 1
+    lookback: 12
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: 12-bar exponential moving average
+  ema_26:
+    category: trend
+    version: 1
+    lookback: 26
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: 26-bar exponential moving average
+  gap:
+    category: price
+    version: 1
+    lookback: 2
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: 'Opening gap vs. prior close: (O_t - C_t-1) / C_t-1'
+  garman_klass_volatility_20:
+    category: volatility
+    version: 1
+    lookback: 20
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: 20-bar Garman-Klass volatility estimator (uses full OHLC, more efficient than close-to-close)
+  hurst_exponent_100:
+    category: statistical
+    version: 1
+    lookback: 100
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: Trailing 100-bar Hurst exponent (rescaled-range method) of the raw close series
+  liquidity_proxy_20:
+    category: regime
+    version: 1
+    lookback: 21
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: 'Trailing 20-bar Amihud illiquidity ratio: mean(|return| / dollar_volume)'
+  log_return_1:
+    category: price
+    version: 1
+    lookback: 2
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: '1-bar log return: ln(C_t/C_t-1)'
+  log_return_20:
+    category: price
+    version: 1
+    lookback: 21
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: '20-bar log return: ln(C_t/C_t-20)'
+  log_return_5:
+    category: price
+    version: 1
+    lookback: 6
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: '5-bar log return: ln(C_t/C_t-5)'
+  log_volume:
+    category: volume
+    version: 1
+    lookback: 1
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: Log-transformed volume (variance-stabilized ahead of z-scoring)
+  macd_histogram:
+    category: trend
+    version: 1
+    lookback: 34
+    dtype: float64
+    uses_future_data: false
+    depends_on:
+    - macd_line
+    - macd_signal
+    consumers: []
+    description: 'MACD histogram: MACD line minus its signal line'
+  macd_line:
+    category: trend
+    version: 1
+    lookback: 26
+    dtype: float64
+    uses_future_data: false
+    depends_on:
+    - ema_12
+    - ema_26
+    consumers: []
+    description: 'MACD line: EMA(12) - EMA(26)'
+  macd_signal:
+    category: trend
+    version: 1
+    lookback: 34
+    dtype: float64
+    uses_future_data: false
+    depends_on:
+    - macd_line
+    consumers: []
+    description: 'MACD signal line: EMA(9) of the MACD line'
+  momentum_10:
+    category: price
+    version: 1
+    lookback: 11
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: '10-bar rate-of-change momentum: 100 * (C_t - C_t-10) / C_t-10'
+  momentum_20:
+    category: price
+    version: 1
+    lookback: 21
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: '20-bar rate-of-change momentum: 100 * (C_t - C_t-20) / C_t-20'
+  obv:
+    category: volume
+    version: 1
+    lookback: 2
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: 'On-Balance Volume: cumulative signed volume from the start of the provided history (expanding,
+      not a fixed trailing window — see module docstring)'
+  parkinson_volatility_20:
+    category: volatility
+    version: 1
+    lookback: 20
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: 20-bar Parkinson volatility estimator (uses high/low range, not just close)
+  range_compression_14:
+    category: market_structure
+    version: 1
+    lookback: 14
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: Current bar range (high-low) relative to its trailing 14-bar mean; <1 = compressed
+  realized_volatility_20:
+    category: volatility
+    version: 1
+    lookback: 21
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: Trailing 20-bar stddev of 1-bar log returns
+  relative_volume_20:
+    category: volume
+    version: 1
+    lookback: 21
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: Current bar's volume relative to the mean of the prior 20 bars (excludes current bar)
+  returns_1:
+    category: price
+    version: 1
+    lookback: 2
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: 1-bar simple percent return
+  rolling_kurtosis_20:
+    category: statistical
+    version: 1
+    lookback: 20
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: Trailing 20-bar excess kurtosis of 1-bar log returns
+  rolling_return_20:
+    category: price
+    version: 1
+    lookback: 21
+    dtype: float64
+    uses_future_data: false
+    depends_on:
+    - log_return_1
+    consumers: []
+    description: Trailing 20-bar rolling mean of 1-bar log returns
+  rolling_skew_20:
+    category: statistical
+    version: 1
+    lookback: 20
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: Trailing 20-bar skewness of 1-bar log returns
+  rolling_std_20:
+    category: volatility
+    version: 1
+    lookback: 20
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: Trailing 20-bar standard deviation of raw close price
+  rolling_vwap_20:
+    category: volume
+    version: 1
+    lookback: 20
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: 20-bar rolling volume-weighted average price
+  rsi_14:
+    category: trend
+    version: 1
+    lookback: 15
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: Relative Strength Index(14)
+  slope_20:
+    category: trend
+    version: 1
+    lookback: 20
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: 20-bar trailing OLS slope of close price vs. time
+  sma_20:
+    category: trend
+    version: 1
+    lookback: 20
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: 20-bar simple moving average
+  sma_50:
+    category: trend
+    version: 1
+    lookback: 50
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: 50-bar simple moving average
+  swing_high_confirmed:
+    category: market_structure
+    version: 1
+    lookback: 11
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: 1.0 if the high 5 bars ago was a confirmed local swing high
+  swing_low_confirmed:
+    category: market_structure
+    version: 1
+    lookback: 11
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: 1.0 if the low 5 bars ago was a confirmed local swing low
+  volatility_clustering_20:
+    category: regime
+    version: 1
+    lookback: 41
+    dtype: float64
+    uses_future_data: false
+    depends_on: []
+    consumers: []
+    description: Trailing 20-bar lag-1 autocorrelation of squared 1-bar log returns (vol clustering)
+  volume_zscore_20:
+    category: volume
+    version: 1
+    lookback: 20
+    dtype: float64
+    uses_future_data: false
+    depends_on:
+    - log_volume
+    consumers: []
+    description: Trailing 20-bar rolling z-score of log volume
