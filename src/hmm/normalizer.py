@@ -38,7 +38,12 @@ def drop_incomplete_rows(
     """
     if X.ndim != 2:
         raise ValueError(f"X must be 2D (n_samples, n_features), got shape {X.shape}")
-    kept_mask = ~np.isnan(X).any(axis=1)
+    # np.asarray(..., dtype=bool) pins the return type explicitly --
+    # `.any(axis=1)`'s inferred type (scalar np.bool_ vs. ndarray) varies
+    # across numpy versions/stubs, which otherwise makes this line's mypy
+    # result depend on exactly which numpy got resolved (seen in practice:
+    # passed locally, failed in CI against a different numpy version).
+    kept_mask = np.asarray(~np.isnan(X).any(axis=1), dtype=np.bool_)
     if not kept_mask.any():
         raise InsufficientDataError(
             f"every one of {X.shape[0]} row(s) has at least one NaN feature; "
