@@ -1,11 +1,18 @@
 name: CI
 
-# Lint/format/type-check/test the src/ + tests/ tree (the `common` and
-# `market_data` packages), plus the one Milestone 2 exception:
-# regime-trader/broker/alpaca_client.py, passed explicitly alongside
-# `src tests` below. The rest of regime-trader/ and backtest/ remain
-# deliberately outside this pipeline — see the tooling-scope note in
-# docs/engineering-handbook/Architecture/Known Gaps.md.
+# Lint/format/type-check/test the src/ + tests/ tree (the `common`,
+# `market_data`, and `features` packages), plus the one Milestone 2
+# exception: regime-trader/broker/alpaca_client.py, passed explicitly
+# alongside `src tests` below. The rest of regime-trader/ and backtest/
+# remain deliberately outside this pipeline — see the tooling-scope note
+# in docs/engineering-handbook/Architecture/Known Gaps.md.
+#
+# Install every first-party extras group (market-data, features, ...) in
+# every job that imports src/ code -- a job that only installs a subset
+# fails on collection (pytest) or silently under-checks (ruff/mypy don't
+# need imports to succeed, so a missing extra there is a quieter gap).
+# Update this list in the same change that adds a new extras group in
+# pyproject.toml.
 
 on:
   push:
@@ -30,8 +37,8 @@ jobs:
         with:
           python-version: "3.11"
           cache: "pip"
-      - name: Install dev + market-data dependencies
-        run: pip install -e ".[dev,market-data]"
+      - name: Install dev + all first-party extras
+        run: pip install -e ".[dev,market-data,features]"
       - name: Ruff
         run: ruff check src tests "$ADAPTER_FILE"
       - name: Black (check only)
@@ -46,8 +53,8 @@ jobs:
         with:
           python-version: "3.11"
           cache: "pip"
-      - name: Install dev + market-data dependencies
-        run: pip install -e ".[dev,market-data]"
+      - name: Install dev + all first-party extras
+        run: pip install -e ".[dev,market-data,features]"
       - name: MyPy
         run: mypy
 
@@ -63,8 +70,8 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: "pip"
-      - name: Install dev + market-data dependencies
-        run: pip install -e ".[dev,market-data]"
+      - name: Install dev + all first-party extras
+        run: pip install -e ".[dev,market-data,features]"
       - name: Pytest
         run: pytest
 
