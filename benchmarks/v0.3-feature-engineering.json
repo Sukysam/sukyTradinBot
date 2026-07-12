@@ -1,0 +1,14 @@
+{
+  "tag": "v0.3-feature-engineering",
+  "date": "2026-07-12",
+  "python_version": "3.9.6",
+  "platform": "darwin",
+  "dataset": "252 synthetic daily bars, full 39-feature registry",
+  "source": "backfilled after the fact from tests/features/test_performance.py's scenario, not captured at tag time",
+  "feature_compute_seconds_1yr_daily_full_registry": 0.133,
+  "memory_mb": 87.5,
+  "known_gaps": [
+    "No 1-minute-bar or live-update-latency memory measurement backfilled -- only the daily-bar scenario was re-run for this snapshot.",
+    "This file was created retroactively during Milestone 4's release management (2026-07-12), not at the time v0.3 was tagged -- timing/memory numbers reflect the current environment, not necessarily the exact machine v0.3 was originally verified on."
+  ]
+}

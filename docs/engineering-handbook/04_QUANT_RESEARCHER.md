@@ -14,6 +14,7 @@ the SHAP explainer that makes that model's decisions auditable.
 |---|---|
 | HMM Regime Detection | Full ownership |
 | Feature Engineering Platform | Full ownership — `src/features/`, see [ADR-003](Architecture/ADR/ADR-003-Feature-Engineering.md) |
+| HMM & Regime Detection Platform | Full ownership — `src/hmm/`, see [ADR-006](Architecture/ADR/ADR-006-RegimeState-Contract.md) and [ADR-007](Architecture/ADR/ADR-007-HMM-Design.md) |
 | Backtesting Framework | Full ownership |
 | SHAP Trade Attribution | Build the explainer and the underlying explainable model; integration into the live decision path owned jointly with Signal Orchestrator |
 | Adaptive Strategy Allocation | Builds the statistical/ML model backing the allocation decision; the decision-routing logic itself is owned by Signal Orchestrator |
@@ -28,15 +29,29 @@ the SHAP explainer that makes that model's decisions auditable.
   is currently trained and run on, unchanged as of Milestone 3.
 - `src/features/` — the Milestone 3 feature engineering platform: registry-
   backed causal feature library, `FeaturePipeline`, canonical
-  `FeatureVector` output, and `config/feature_manifest.yaml`. Not yet
-  wired to the HMM or any other consumer — see [ADR-003](Architecture/ADR/ADR-003-Feature-Engineering.md).
-  Milestone 4 re-points `hmm_engine.py` at this pipeline instead of
-  `data/feature_engineering.py` directly. `FeatureVector` is now a frozen
-  contract, currently v2 ([ADR-004](Architecture/ADR/ADR-004-FeatureVector-Contract-Freeze.md),
+  `FeatureVector` output, and `config/feature_manifest.yaml`. Consumed by
+  `src/hmm/` as of Milestone 4, not yet by `regime-trader/`'s live
+  `hmm_engine.py` — see [ADR-003](Architecture/ADR/ADR-003-Feature-Engineering.md).
+  `FeatureVector` is now a frozen contract, currently v2
+  ([ADR-004](Architecture/ADR/ADR-004-FeatureVector-Contract-Freeze.md),
   [ADR-005](Architecture/ADR/ADR-005-FeatureVector-Provenance.md) added
   `provenance` for reproducibility/traceability; binding spec:
   [Standards/FeatureVector Contract.md](Standards/FeatureVector%20Contract.md))
   — read it before wiring any consumer to this pipeline.
+- `src/hmm/` — the Milestone 4 HMM & regime detection platform: `hmm.
+  service.RegimeService` trains, selects, persists, and runs causal
+  forward-algorithm inference against a Gaussian HMM, consuming only
+  `FeatureVector` and producing only the frozen `RegimeState` contract.
+  Ported the causal Forward Algorithm and BIC selection from
+  `hmm_engine.py` rather than reimplementing them (extends, doesn't
+  replace, matching Milestone 3's own precedent for
+  `feature_engineering.py`). Not yet wired to any consumer or to
+  `main.py.ModelStore` (which returns a raw `GaussianHMM`, incompatible
+  with this package's "never expose `hmmlearn` internals" rule — see
+  [ADR-007](Architecture/ADR/ADR-007-HMM-Design.md) Decision 7).
+  `RegimeState` is a frozen contract ([ADR-006](Architecture/ADR/ADR-006-RegimeState-Contract.md),
+  binding spec: [Standards/RegimeState Contract.md](Standards/RegimeState%20Contract.md))
+  — read it before wiring any consumer to this package.
 - `backtest/` — SMA-crossover backtester (`sma_crossover.py`,
   `optimize_sma.py`) against Binance klines. Unrelated crypto sandbox, no
   shared imports with `regime-trader/`.

@@ -13,6 +13,90 @@ Versions are tagged per milestone (`vN-<milestone-name>`), not per
 semantic-versioning release — this project doesn't ship releases in the
 traditional sense yet.
 
+## v0.4 - HMM & Regime Detection (2026-07-12, tag `v0.4-hmm-regime-detection`)
+
+### Added
+- `src/hmm/` — a new, independently packaged platform: `hmm.service.
+  RegimeService`, a deterministic Gaussian HMM engine consuming only
+  `FeatureVector` and producing only the canonical `RegimeState`
+  (`timestamp`, `symbol`, `regime_id`, `confidence`,
+  `transition_probability`, `model_version`, `feature_pipeline_version`,
+  `metadata`).
+- `hmm.normalizer.ZScoreNormalizer` — deterministic per-feature
+  normalization with explicit missing-value handling (`drop_incomplete_
+  rows`; never silent imputation).
+- `hmm.trainer`/`hmm.selector` — Baum-Welch/EM training with configurable
+  state count, covariance type, and random seed (multiple restarts,
+  highest-log-likelihood kept), plus BIC+AIC model selection over a
+  configurable candidate state range — both criteria always computed and
+  recorded regardless of which one drives selection.
+- `hmm.inference.forward_algorithm` — the causal Forward Algorithm
+  (`P(S_t | X_{1:t})`), ported from `regime-trader/core/hmm_engine.py`;
+  `GaussianHMM.predict_proba`/`.predict`/`.decode` are never called
+  anywhere in this package.
+- `hmm.persistence` — filesystem artifact save/load (`model.pkl`,
+  `normalizer.pkl`, `metadata.json`), versioned per symbol.
+- Hard-fail feature-version drift detection: `RegimeService.infer`/
+  `infer_series` refuse to run if a `FeatureVector`'s
+  `provenance.feature_versions` doesn't match what the loaded model was
+  trained on — the direct payoff of Milestone 3's `Provenance` addition
+  (v0.3.x, ADR-005).
+- `ADR-006-RegimeState-Contract.md` and `ADR-007-HMM-Design.md` — the
+  `RegimeState` contract freeze and the modeling/engineering decisions
+  behind `src/hmm/`; binding spec: `Standards/RegimeState Contract.md`.
+- `hmm` extras group in `pyproject.toml` (pandas, numpy, scipy, hmmlearn),
+  depending on `features.feature_vector`/`features.pipeline` at import
+  time but never on `market_data` directly.
+- `common.time.require_utc` — a shared UTC-timestamp validation helper,
+  promoted out of three independent copies of the same check
+  (`market_data.models.Bar`, `features.feature_vector`, and now
+  `hmm.models.RegimeState`).
+- 91 tests for `src/hmm` (unit, integration, quantitative regime-
+  switching/stability/noise/constant-series/missing-value scenarios,
+  reproducibility, and performance), plus one true end-to-end integration
+  test running real `Bar`s through `FeaturePipeline` into `RegimeService`.
+- `benchmarks/` — one JSON snapshot per tagged milestone (timing +
+  peak-RSS memory), so performance regressions are diffable against
+  history instead of re-derived from old PR descriptions. Includes a
+  backfilled `v0.3-feature-engineering.json` alongside this tag's own
+  `v0.4-hmm-regime-detection.json`.
+- As a prerequisite landed in this same tag: `FeatureVector` contract v2
+  — a required `provenance: Provenance` field (`pipeline_version`,
+  `manifest_version`, `feature_versions`, `generated_at`,
+  `source_dataset`), replacing the old duplicated `version`/
+  `metadata["pipeline_version"]`/`metadata["source"]` fields (ADR-004,
+  ADR-005; binding spec: `Standards/FeatureVector Contract.md`).
+
+### Changed
+- Nothing in `regime-trader/` changed — `core/hmm_engine.py` remains the
+  live regime-detection path; `src/hmm/` is not yet wired to any consumer
+  or to `main.py.ModelStore` (deliberate — see ADR-007 Decision 7).
+
+### Known limitations
+- Only exercised against synthetic `FeatureVector`s and real
+  `FeaturePipeline` output over synthetic bars — no model in this
+  milestone has been trained or run against real historical or live
+  market data.
+- Single-inference latency measured at ~20ms over a 252-bar window, not
+  the originally-targeted <5ms — that target assumed an incremental,
+  O(1)-per-call live filter (`hmm_engine.py`'s `ForwardFilter`) that this
+  milestone deliberately didn't build; `RegimeService.infer` re-runs the
+  batch Forward Algorithm over the full supplied window every call
+  instead. See ADR-007 Decision 7.
+- `main.py.ModelStore.get_model(ticker) -> GaussianHMM` is incompatible
+  with `RegimeService`'s "never expose `hmmlearn` internals" rule and is
+  not satisfied by this milestone — reconciling the two is left to
+  whichever milestone first wires a real consumer to `src/hmm/`.
+- A real bug (`scipy.stats.multivariate_normal.logpdf` raising on a
+  singular covariance matrix, reproduced by a constant-valued feature)
+  was found and fixed in `src/hmm/inference.py`
+  (`allow_singular=True`); the identical, unfixed exposure in the ported-
+  from `regime-trader/core/hmm_engine.py` is flagged as a follow-up, not
+  fixed in this change.
+- `ModelMetadata.feature_versions` snapshots only the *last* row of the
+  training window, not the whole window — a feature-formula change that
+  lands mid-training-window isn't separately detected.
+
 ## v0.3 - Feature Engineering Platform (2026-07-12, tag `v0.3-feature-engineering`)
 
 ### Added
