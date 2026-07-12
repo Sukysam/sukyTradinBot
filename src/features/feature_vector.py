@@ -8,6 +8,14 @@ produced by exactly one pipeline (`pipeline.FeaturePipeline`), so feature
 computation can never silently diverge between live trading, backtests,
 and model training the way it does in systems that reimplement the same
 indicator three times.
+
+This type is a frozen, binding contract as of
+docs/engineering-handbook/Architecture/ADR/ADR-004-FeatureVector-Contract-Freeze.md
+-- required fields, metadata schema, feature-ordering guarantees,
+versioning policy, and backward-compatibility rules are all documented in
+full at "docs/engineering-handbook/Standards/FeatureVector Contract.md".
+Read that document, not just this docstring, before changing any field
+here or before building a new consumer that depends on this shape.
 """
 
 from __future__ import annotations

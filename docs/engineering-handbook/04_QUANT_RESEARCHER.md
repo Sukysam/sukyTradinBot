@@ -31,7 +31,10 @@ the SHAP explainer that makes that model's decisions auditable.
   `FeatureVector` output, and `config/feature_manifest.yaml`. Not yet
   wired to the HMM or any other consumer — see [ADR-003](Architecture/ADR/ADR-003-Feature-Engineering.md).
   Milestone 4 re-points `hmm_engine.py` at this pipeline instead of
-  `data/feature_engineering.py` directly.
+  `data/feature_engineering.py` directly. `FeatureVector` is now a frozen
+  contract ([ADR-004](Architecture/ADR/ADR-004-FeatureVector-Contract-Freeze.md),
+  binding spec: [Standards/FeatureVector Contract.md](Standards/FeatureVector%20Contract.md))
+  — read it before wiring any consumer to this pipeline.
 - `backtest/` — SMA-crossover backtester (`sma_crossover.py`,
   `optimize_sma.py`) against Binance klines. Unrelated crypto sandbox, no
   shared imports with `regime-trader/`.
