@@ -23,6 +23,7 @@ new ADR or changes an existing one's status.
 | [005 — FeatureVector Provenance](ADR-005-FeatureVector-Provenance.md) | Accepted | Adds a required `provenance` field to `FeatureVector` (pipeline/manifest/feature versions, generation time, source dataset) for reproducibility and training/inference consistency checks — bumps the contract to v2. |
 | [006 — RegimeState Contract](ADR-006-RegimeState-Contract.md) | Accepted | Freezes `RegimeState` — the HMM's only output type — as a stable interface ahead of Milestone 5, before any real consumer exists. |
 | [007 — HMM Design](ADR-007-HMM-Design.md) | Accepted | Milestone 4's modeling and engineering decisions: porting the causal Forward Algorithm/BIC selection from `regime-trader/core/hmm_engine.py`, explicit missing-value handling, always computing both BIC and AIC, filesystem persistence, hard-fail feature-version drift detection at inference, and what's deliberately deferred (incremental live inference, `main.py.ModelStore` wiring). |
+| [008 — StrategyDecision Contract](ADR-008-StrategyDecision-Contract.md) | Accepted | Freezes `StrategyDecision` — the Strategy Engine's only output type — as a stable interface *before* `src/strategy/` exists at all, a stricter sequencing than ADR-006/ADR-004's freezes. `allocation` bounded to `[0.0, 1.0]` and `reasoning` required-non-empty enforce existing invariants (long-only, always-explainable) at the type level. |
 
 ## When to write one
 
