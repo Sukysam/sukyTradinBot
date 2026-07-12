@@ -7,7 +7,8 @@ for the project's vision, principles, and standards — read it before
 making any change to this repository.
 
 **Current status**: see [PROJECT_STATUS.md](PROJECT_STATUS.md) for the
-live milestone dashboard.
+live milestone dashboard and [CHANGELOG.md](CHANGELOG.md) for what's
+shipped in each tagged version.
 
 ## Repository layout
 

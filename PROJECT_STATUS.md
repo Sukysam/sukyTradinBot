@@ -7,7 +7,20 @@ fast answer to "where are we"; for the *why* behind any of it, see
 [docs/engineering-handbook/Architecture/Known Gaps.md](docs/engineering-handbook/Architecture/Known%20Gaps.md)
 (what's built vs. missing at the component level).
 
-**Last updated**: 2026-07-12 · **Current milestone**: 3 — HMM (not started)
+**Last updated**: 2026-07-12 · **Current milestone**: 3 — Feature Engineering Platform (not started)
+
+**Roadmap revision (2026-07-12)**: milestones 3–10 below were restructured
+from the original plan after Milestone 2's retro. Two changes: (1) a
+dedicated Feature Engineering Platform milestone now sits between Market
+Data and HMM, so the HMM consumes a normalized `FeatureVector`, never raw
+bars, directly — see the "Feature pipeline" note under Milestone 3; (2)
+the former single "Strategies" milestone is split into **Strategy Engine**
+(regime-tier allocation logic, Milestone 5) and **Signal Orchestration**
+(final cross-source arbitration, Milestone 11, moved later since it
+depends on every other signal source existing first). See
+[CHANGELOG.md](CHANGELOG.md) for what shipped under the original numbering
+in v0.1/v0.2 — this file's milestone numbers describe what's ahead, not a
+renumbering of history.
 
 ## Legend
 
@@ -24,14 +37,16 @@ fast answer to "where are we"; for the *why* behind any of it, see
 |---|---|---|---|---|
 | 1 | Foundation | ✅ Complete | Packaging (`pyproject.toml`), dependency management, `src/common/` (config, structured logging, base interfaces, utilities), Docker/Compose, GitHub Actions CI, Ruff/Black/MyPy/Pytest, pre-commit. No trading logic. | Tagged `v0.1-foundation`. Key decisions (Protocols, Pydantic, strict MyPy, DI, the `[trading]` extra, why `regime-trader/` wasn't touched): [ADR-001-Foundation](docs/engineering-handbook/Architecture/ADR/ADR-001-Foundation.md). Tooling is scoped to `src/`+`tests/` only — see Known Gaps.md's "Tooling scope" note. |
 | 2 | Market Data | ✅ Complete | Provider interfaces, provider-agnostic models (Bar/Trade/Quote/OrderBook/Snapshot/CorporateAction), Alpaca historical + streaming providers, retry/rate-limiting, Parquet+DuckDB storage with incremental updates, validation (missing bars/duplicates/timezone/split adjustment), replay harness. 168 tests, 97% coverage. | Tagged `v0.2-market-data`. Closed Known Gaps item 2 — `regime-trader/broker/alpaca_client.py` is now a real adapter over `src/market_data`, wired into `main.py`. Key decisions (new package vs. `regime-trader/broker/`, Protocol interfaces, Parquet+DuckDB, the `[market-data]` extra, the adapter pattern, custom reconnect/heartbeat): [ADR-002-Market-Data](docs/engineering-handbook/Architecture/ADR/ADR-002-Market-Data.md). Not exercised against a live Alpaca account — no credentials available; SDK usage verified against the installed `alpaca-py` package instead. |
-| 3 | HMM | ⏳ Planned | Regime detection model lifecycle: training, persistence, refresh cadence. | Closes Known Gaps item 3 (model store). A reference forward-inference implementation already exists at `regime-trader/core/hmm_engine.py` — this milestone is expected to build the missing persistence/refresh layer around it, not redo the math. Can now draw on `src/market_data` for historical bars where needed. |
-| 4 | Strategies | ⏳ Planned | Adaptive strategy allocation: HMM probabilities + features → trade decisions. | Closes Known Gaps item 4 (`core/signal_generator.py` + `core/regime_strategies.py`). Depends on Milestone 3. |
-| 5 | Risk | ⏳ Planned | Risk veto layer, exposure/concentration limits, circuit breakers, emergency hard stop. | A complete reference implementation already exists at `regime-trader/core/risk_manager.py` (see Capability Ownership Map). This milestone packages/hardens it under `src/`, not a from-scratch build. |
-| 6 | Execution | ⏳ Planned | Order construction and submission, broker order lifecycle. | Reference implementation exists at `regime-trader/broker/order_executor.py`. Depends on Milestones 2, 4, and 5 (nothing executes without a data source, a decision, and a veto). |
-| 7 | Backtesting | ⏳ Planned | Regime-aware equity backtesting harness. | Closes Known Gaps item 6. Depends on Milestones 2 and 3 (needs real historical data and a trained model to replay against). Distinct from the existing crypto SMA sandbox in `backtest/`. |
-| 8 | Memory | ⏳ Planned | Reinforcement-learning memory loop, online learning, durable state. | Reference implementation exists at `regime-trader/core/learning_engine.py`. See [Architecture/Reinforcement Learning Memory Loop.md](docs/engineering-handbook/Architecture/Reinforcement%20Learning%20Memory%20Loop.md). |
-| 9 | NLP | ⏳ Planned | FinBERT news sentiment scoring; SHAP trade attribution. | Sentiment reference implementation exists at `regime-trader/core/sentiment_engine.py`. SHAP attribution closes Known Gaps item 5 and is net-new — see [Architecture/SHAP Trade Attribution.md](docs/engineering-handbook/Architecture/SHAP%20Trade%20Attribution.md). Depends on Milestone 4. |
-| 10 | Production | ⏳ Planned | Full production deployment: orchestration, model serving, monitoring, backup/restore, the paper→live gate. | See [Architecture/Production Deployment.md](docs/engineering-handbook/Architecture/Production%20Deployment.md) and [SOPs/Release Workflow.md](docs/engineering-handbook/SOPs/Release%20Workflow.md). Live trading is gated behind this milestone, not before. |
+| 3 | Feature Engineering Platform | ⏳ Planned | Reusable, causal feature pipeline: price (returns, momentum, gaps), volatility (ATR, realized/Parkinson/Garman–Klass, rolling std), trend (EMA/SMA/MACD/ADX/slope), volume (VWAP/OBV/z-score/relative volume), market structure (HH/LL, swing points, breakouts, range compression), statistical (skew, kurtosis, autocorrelation, Hurst), and regime features (correlation shifts, vol clustering, liquidity proxies), unified behind one `FeatureVector(timestamp, symbol, features, metadata)` output every downstream consumer (HMM, backtesting, adaptive learning, SHAP, NLP, risk) reads. | Not a greenfield build: `regime-trader/data/feature_engineering.py` already implements a strictly causal subset (log returns, rolling volatility, ADX, RSI, momentum, ATR, 252-day rolling z-scores) — this milestone extends and formalizes that into a fully-tooled `src/` package, it doesn't replace working math. Every feature must pass [Standards/Anti-Lookahead Checklist.md](docs/engineering-handbook/Standards/Anti-Lookahead%20Checklist.md). Inserted ahead of HMM specifically so the HMM never consumes raw bars directly — see Milestone 4. |
+| 4 | HMM & Regime Detection | ⏳ Planned | Regime detection model lifecycle, consuming `FeatureVector` only: normalize → train → infer → regime. Persistence and refresh cadence for the fitted model. | Closes Known Gaps item 3 (model store). A reference forward-inference implementation already exists at `regime-trader/core/hmm_engine.py` (`ForwardFilter`, BIC model selection) — this milestone builds the missing persistence/refresh layer and re-points inference at Milestone 3's feature pipeline instead of `data/feature_engineering.py` directly. Depends on Milestone 3. |
+| 5 | Strategy Engine | ⏳ Planned | Regime-tier → allocation logic: what a given regime + feature context implies about position bias and sizing, independent of arbitrating it against other signal sources. | Closes the `core/regime_strategies.py` half of Known Gaps item 4. Depends on Milestone 4. Feeds Milestone 11, doesn't merge signals itself — see that milestone for why the two were split. |
+| 6 | Risk Management | ⏳ Planned | Risk veto layer, exposure/concentration limits, circuit breakers, emergency hard stop. | A complete reference implementation already exists at `regime-trader/core/risk_manager.py` (see Capability Ownership Map). This milestone packages/hardens it under `src/`, not a from-scratch build. |
+| 7 | Execution Layer | ⏳ Planned | Order construction and submission, broker order lifecycle. | Reference implementation exists at `regime-trader/broker/order_executor.py`. Depends on Milestones 5 and 6 (nothing executes without a decision and a veto). |
+| 8 | Backtesting & Validation | ⏳ Planned | Regime-aware equity backtesting harness, replaying the real feature → HMM → strategy path offline. | Closes Known Gaps item 6. Depends on Milestones 2–4 (needs real historical data, the feature pipeline, and a trained model to replay against). Distinct from the existing crypto SMA sandbox in `backtest/`. |
+| 9 | Adaptive Learning | ⏳ Planned | Evolve the existing Thompson-sampling contextual-bandit memory loop — or replace it, if a concrete evaluation justifies it — into the system's broader online-learning mechanism. | Reference implementation exists at `regime-trader/core/learning_engine.py`. See [Architecture/Reinforcement Learning Memory Loop.md](docs/engineering-handbook/Architecture/Reinforcement%20Learning%20Memory%20Loop.md). Any replacement decision gets its own ADR before implementation, not assumed here. |
+| 10 | NLP & Event Processing | ⏳ Planned | FinBERT news sentiment scoring; SHAP trade attribution. | Sentiment reference implementation exists at `regime-trader/core/sentiment_engine.py`. SHAP attribution closes Known Gaps item 5 and is net-new — see [Architecture/SHAP Trade Attribution.md](docs/engineering-handbook/Architecture/SHAP%20Trade%20Attribution.md). Depends on Milestone 5 (needs a real allocation model to attribute). |
+| 11 | Signal Orchestration | ⏳ Planned | Final arbitration: merges regime/strategy output (5), adaptive-learning confidence (9), and NLP catalyst signals (10) — gated by risk (6) — into one `TradeDecision`. Conflict resolution, priority rules, conviction scoring. | Closes the `core/signal_generator.py` half of Known Gaps item 4. Deliberately sequenced last among the signal-producing milestones — it has nothing to arbitrate until 5, 9, and 10 all exist. Never bypasses Milestone 6's veto. |
+| 12 | Production Monitoring & Deployment | ⏳ Planned | Full production deployment: orchestration, model serving, monitoring, backup/restore, the paper→live gate. | See [Architecture/Production Deployment.md](docs/engineering-handbook/Architecture/Production%20Deployment.md) and [SOPs/Release Workflow.md](docs/engineering-handbook/SOPs/Release%20Workflow.md). Live trading is gated behind this milestone, not before. |
 
 ## How this file is maintained
 
@@ -48,6 +63,13 @@ speculatively ahead of one starting. On completion:
    [Architecture/Known Gaps.md](docs/engineering-handbook/Architecture/Known%20Gaps.md) —
    if this milestone closed a tracked gap, move it there too, in the same
    change, per Definition of Done.
+4. Add the same milestone to [CHANGELOG.md](CHANGELOG.md), under
+   Added/Changed/Known limitations. This file (`PROJECT_STATUS.md`) is the
+   forward-looking roadmap and can be freely rewritten as plans change
+   (see the 2026-07-12 revision above); `CHANGELOG.md` is the historical
+   record of what actually shipped in each tagged version and is never
+   rewritten after the fact — the two serve different purposes and neither
+   substitutes for the other.
 
 This file summarizes; the handbook is still authoritative on anything it
 and this file disagree about.
