@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from common.time import FixedClock, SystemClock, utc_now
+from common.time import FixedClock, SystemClock, require_utc, utc_now
 
 
 def test_system_clock_returns_timezone_aware_utc_now() -> None:
@@ -35,3 +35,18 @@ def test_fixed_clock_advance_moves_time_forward() -> None:
     clock = FixedClock(datetime(2026, 6, 1, 12, 0, 0, tzinfo=timezone.utc))
     clock.advance(seconds=90)
     assert clock.now() == datetime(2026, 6, 1, 12, 1, 30, tzinfo=timezone.utc)
+
+
+def test_require_utc_accepts_utc_datetime() -> None:
+    require_utc(datetime(2026, 6, 1, tzinfo=timezone.utc), "ts")  # must not raise
+
+
+def test_require_utc_rejects_naive_datetime() -> None:
+    with pytest.raises(ValueError, match="ts must be timezone-aware"):
+        require_utc(datetime(2026, 6, 1), "ts")
+
+
+def test_require_utc_rejects_non_utc_offset() -> None:
+    non_utc = datetime(2026, 6, 1, tzinfo=timezone(timedelta(hours=-5)))
+    with pytest.raises(ValueError, match="ts must be normalized to UTC"):
+        require_utc(non_utc, "ts")

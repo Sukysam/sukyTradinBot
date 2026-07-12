@@ -25,15 +25,23 @@ sector map). Acceptable in paper trading; **blocking for live** per
 [SOPs/Release Workflow.md](../SOPs/Release%20Workflow.md). Owner:
 [02_TECHNICAL_PLANNER.md](../02_TECHNICAL_PLANNER.md) / [System Architect](../01_SYSTEM_ARCHITECT.md).
 
-### 3. A trained-HMM-model store
-Satisfies `main.py.ModelStore`: `get_model(ticker) -> GaussianHMM`.
-Persistence and refresh cadence for `hmm_engine.GaussianHMM` fits is **not
-specified anywhere in the spec's Sec. 6 pipelines** — needs a design
-decision, not just an implementation. This is also the blocker for
+### 3. A trained-HMM-model store (partially closed by Milestone 4)
+Was: satisfies `main.py.ModelStore`: `get_model(ticker) -> GaussianHMM`.
+Persistence itself is now real — `hmm.persistence.save`/`load` writes/reads
+a versioned, per-symbol artifact (`model.pkl`, `normalizer.pkl`,
+`metadata.json`) via `hmm.service.RegimeService.save`/`load`; see
+[ADR-007](ADR/ADR-007-HMM-Design.md) Decision 5. What remains open:
+`main.py.ModelStore.get_model(ticker)` still returns a raw `GaussianHMM`,
+which `RegimeService` deliberately never exposes (see ADR-007's "never
+expose hmmlearn internals" requirement) — reconciling the two Protocols is
+explicitly deferred to whichever milestone first wires a real consumer to
+`src/hmm/` (see ADR-007 Decision 7). Refresh cadence (when a persisted
+model gets retrained) is still undecided — this is also the blocker for
 "online learning" of the HMM layer itself (today, online learning is
 implemented only for the RL memory loop's bandit — see
 [Architecture/Reinforcement Learning Memory Loop.md](Reinforcement%20Learning%20Memory%20Loop.md)).
-Owner: [05_MEMORY_ENGINEER.md](../05_MEMORY_ENGINEER.md).
+Owner: [05_MEMORY_ENGINEER.md](../05_MEMORY_ENGINEER.md) (refresh cadence),
+[04_QUANT_RESEARCHER.md](../04_QUANT_RESEARCHER.md) (`src/hmm/` itself).
 
 ### 4. `core/signal_generator.py` + `core/regime_strategies.py` (Adaptive Strategy Allocation)
 Satisfies `main.py.SignalGenerator`: `evaluate_bar(...)` and
@@ -85,7 +93,7 @@ Items 5 and 6 are not `Protocol`-wired dependencies of `main.py` — they are
 downstream capabilities that simply don't exist as modules yet. Their
 "not implemented" state is tracked here, not via a runtime placeholder.
 
-## Tooling scope (Milestone 1: Foundation; updated Milestone 2, Milestone 3)
+## Tooling scope (Milestone 1: Foundation; updated Milestone 2, Milestone 3, Milestone 4)
 
 Milestone 1 added real packaging and tooling — `pyproject.toml`, Ruff,
 Black, MyPy, Pytest, pre-commit, GitHub Actions CI, and a Docker/Compose
@@ -105,8 +113,9 @@ become permanent:
   `tests/`, plus one explicit exception added in Milestone 2:
   `regime-trader/broker/alpaca_client.py` (new code, not pre-existing —
   see [ADR-002](ADR/ADR-002-Market-Data.md) Decision 5). `src/features/`
-  and `tests/features/` (Milestone 3) fall under the same `src`/`tests`
-  scoping as `src/market_data` — no new exception needed. Every other file
+  and `tests/features/` (Milestone 3), and `src/hmm/` and `tests/hmm/`
+  (Milestone 4), fall under the same `src`/`tests` scoping as
+  `src/market_data` — no new exception needed. Every other file
   under `regime-trader/` or `backtest/` still gets no automated
   lint/format/type coverage; pre-commit's Ruff/Black/MyPy hooks are scoped
   with `files: ^(src|tests)/|^regime-trader/broker/alpaca_client\.py$` for
@@ -127,10 +136,15 @@ become permanent:
   extra (pandas, numpy, ta) for `src/features`, which depends on
   `market_data.models`/`market_data.validation` at import time but not on
   `market_data`'s heavier storage/provider dependencies — see
-  [ADR-003](ADR/ADR-003-Feature-Engineering.md). None of `trading`,
-  `market-data`, or `features` is a base dependency of `src/common`;
-  installing the foundation package alone (`pip install -e .` or
-  `pip install -e ".[dev]"`) never pulls in any of them.
+  [ADR-003](ADR/ADR-003-Feature-Engineering.md) — and an `hmm` extra
+  (pandas, numpy, scipy, hmmlearn) for `src/hmm`, which depends on
+  `features.feature_vector`/`features.pipeline` at import time but never
+  on `market_data` directly — this package never touches a raw bar, only
+  `FeatureVector`s — see [ADR-007](ADR/ADR-007-HMM-Design.md). None of
+  `trading`, `market-data`, `features`, or `hmm` is a base dependency of
+  `src/common`; installing the foundation package alone
+  (`pip install -e .` or `pip install -e ".[dev]"`) never pulls in any of
+  them.
 
 ## Resolved gaps
 

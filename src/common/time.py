@@ -55,6 +55,28 @@ class FixedClock:
         self._instant = self._instant + timedelta(seconds=seconds)
 
 
+def require_utc(value: datetime, field_name: str) -> None:
+    """Raise `ValueError` unless `value` is timezone-aware and normalized to
+    UTC exactly (not merely "has a tzinfo") -- e.g. `+00:00`, not `-05:00`.
+
+    The same naive-datetime and wrong-offset check was independently
+    written three times across this codebase (`market_data.models.Bar`,
+    `features.feature_vector.FeatureVector`/`Provenance`, and
+    `hmm.models.RegimeState`) before being promoted here — see
+    docs/engineering-handbook/Architecture/ADR/ADR-007-HMM-Design.md.
+    `field_name` is included in the error so a caller validating several
+    datetime fields on one object gets a message pointing at the specific
+    field, not just "a timestamp was wrong."
+    """
+    if value.tzinfo is None:
+        raise ValueError(f"{field_name} must be timezone-aware, got naive datetime {value!r}")
+    if value.utcoffset() != timezone.utc.utcoffset(None):
+        raise ValueError(
+            f"{field_name} must be normalized to UTC, got offset "
+            f"{value.utcoffset()} for {value!r}"
+        )
+
+
 def utc_now() -> datetime:
     """Convenience free function equivalent to `SystemClock().now()`.
 
@@ -68,4 +90,4 @@ def utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-__all__ = ["Clock", "FixedClock", "SystemClock", "utc_now"]
+__all__ = ["Clock", "FixedClock", "SystemClock", "require_utc", "utc_now"]

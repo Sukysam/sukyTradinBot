@@ -72,6 +72,21 @@ features = [
     "numpy>=1.26",
     "ta>=0.11",
 ]
+# Runtime dependencies of `src/hmm` (Milestone 4). Depends on `features.
+# feature_vector`/`features.pipeline` at import time (for the `FeatureVector`
+# contract and `PIPELINE_VERSION` -- see
+# docs/engineering-handbook/Architecture/ADR/ADR-007-HMM-Design.md), and on
+# `common` for `Clock`/`atomic_write_json`, but never on `market_data` --
+# this package never touches a raw bar. `scipy` is the forward-algorithm
+# log-space math (`logsumexp`, `multivariate_normal`); `hmmlearn` is the
+# Baum-Welch/EM trainer. Neither pulls in `market-data`'s or `trading`'s
+# heavier dependencies (pyarrow, duckdb, alpaca-py, torch, transformers).
+hmm = [
+    "pandas>=2.0",
+    "numpy>=1.26",
+    "scipy>=1.11",
+    "hmmlearn>=0.3",
+]
 # Runtime dependencies of the pre-existing regime-trader/ and backtest/ code
 # trees, declared here for installability and documentation purposes only —
 # regime-trader/'s own trading logic (core/, broker/ minus the Milestone 2
@@ -90,12 +105,13 @@ trading = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["common*", "market_data*", "features*"]
+include = ["common*", "market_data*", "features*", "hmm*"]
 
 [tool.setuptools.package-data]
 common = ["py.typed"]
 market_data = ["py.typed"]
 features = ["py.typed"]
+hmm = ["py.typed"]
 
 # --------------------------------------------------------------------------
 # Ruff (lint + import sort). Scoped to the foundation/market-data packages
@@ -130,7 +146,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["common", "market_data", "features"]
+known-first-party = ["common", "market_data", "features", "hmm"]
 
 [tool.ruff.format]
 # Formatting is Black's responsibility (see [tool.black] below); Ruff is
@@ -174,7 +190,18 @@ module = "yaml.*"
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["alpaca.*", "duckdb.*", "duckdb", "pyarrow.*", "pandas.*", "pandas", "ta.*", "ta"]
+module = [
+    "alpaca.*",
+    "duckdb.*",
+    "duckdb",
+    "pyarrow.*",
+    "pandas.*",
+    "pandas",
+    "ta.*",
+    "ta",
+    "hmmlearn.*",
+    "scipy.*",
+]
 ignore_missing_imports = true
 
 # --------------------------------------------------------------------------
@@ -189,9 +216,9 @@ testpaths = ["tests"]
 # Milestone 2 adapter at regime-trader/broker/alpaca_client.py are the only
 # consumer of this today; see tests/regime_trader/.
 pythonpath = ["src", "regime-trader"]
-addopts = "-ra --strict-markers --cov=common --cov=market_data --cov=features --cov-report=term-missing"
+addopts = "-ra --strict-markers --cov=common --cov=market_data --cov=features --cov=hmm --cov-report=term-missing"
 markers = [
-    "performance: measures wall-clock performance against Milestone 3's targets (slower; see tests/features/test_performance.py)",
+    "performance: measures wall-clock performance against a milestone's documented targets (slower; see tests/features/test_performance.py and tests/hmm/test_performance.py)",
 ]
 asyncio_mode = "auto"
 filterwarnings = [
@@ -220,7 +247,7 @@ filterwarnings = [
 ]
 
 [tool.coverage.run]
-source = ["src/common", "src/market_data", "src/features"]
+source = ["src/common", "src/market_data", "src/features", "src/hmm"]
 branch = true
 
 [tool.coverage.report]

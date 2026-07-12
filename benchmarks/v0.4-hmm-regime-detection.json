@@ -1,0 +1,16 @@
+{
+  "tag": "v0.4-hmm-regime-detection",
+  "date": "2026-07-12",
+  "python_version": "3.9.6",
+  "platform": "darwin",
+  "dataset": "252 synthetic daily bars, 10 features, 2 synthetic regimes, BIC selection over candidate_states=(3,4,5), n_init=3",
+  "source": "tests/hmm/test_performance.py's scenario, re-run standalone with resource.getrusage wrapped around RegimeService.train",
+  "training_seconds": 1.593,
+  "inference_ms_per_call": 20.9,
+  "model_load_seconds": 0.001,
+  "memory_mb": 151.8,
+  "known_gaps": [
+    "inference_ms_per_call measures RegimeService.infer, which re-runs the batch Forward Algorithm over the entire supplied 252-bar window every call -- not the incremental, O(1)-per-call ForwardFilter.update() live workload production is expected to actually use. See docs/engineering-handbook/Architecture/ADR/ADR-007-HMM-Design.md Decision 7: that incremental path is deliberately deferred and has no benchmark yet -- add one (a much smaller, sub-5ms number) once it's built and has a real consumer.",
+    "memory_mb is whole-process peak RSS including numpy/scipy/hmmlearn import overhead, not training's incremental memory cost alone -- see benchmarks/README.md's methodology note."
+  ]
+}

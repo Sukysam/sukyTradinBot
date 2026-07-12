@@ -68,7 +68,7 @@ anyone should look to answer "is X actually built yet."
 
 | Capability | Status | Primary Owner | Core Module(s) |
 |---|---|---|---|
-| HMM Regime Detection | **Implemented** | [04 Quant Researcher](04_QUANT_RESEARCHER.md) | `core/hmm_engine.py`, `data/feature_engineering.py` |
+| HMM Regime Detection (live) | **Implemented** | [04 Quant Researcher](04_QUANT_RESEARCHER.md) | `core/hmm_engine.py`, `data/feature_engineering.py` — the still-live production path; not yet re-pointed at `src/hmm/`/`src/features/` |
 | Adaptive Strategy Allocation | **Interface defined, logic not yet built** | [07 Signal Orchestrator](07_SIGNAL_ORCHESTRATOR.md) | `core/signal_generator.py`, `core/regime_strategies.py` (not yet built) |
 | Reinforcement Learning Memory Loop | **Implemented** (contextual multi-armed bandit) | [05 Memory Engineer](05_MEMORY_ENGINEER.md) | `core/learning_engine.py`, `data/trade_context_db.json`, `data/learning_weights.json` |
 | Online Learning | **Implemented** (weekly incremental posterior updates) | [05 Memory Engineer](05_MEMORY_ENGINEER.md) / [04 Quant Researcher](04_QUANT_RESEARCHER.md) | `learning_engine.run_weekly_optimization`; HMM refresh cadence is **planned** |
@@ -77,7 +77,8 @@ anyone should look to answer "is X actually built yet."
 | Event-Driven Execution | **Implemented** | [01 System Architect](01_SYSTEM_ARCHITECT.md) / [03 Backend Engineer](03_BACKEND_ENGINEER.md) | `main.py` (structural + news pipelines), `broker/news_streamer.py` |
 | Market Data Platform | **Implemented** (historical + streaming, Parquet/DuckDB storage, validation, replay) | [03 Backend Engineer](03_BACKEND_ENGINEER.md) | `src/market_data/` — see [ADR-002](Architecture/ADR/ADR-002-Market-Data.md) |
 | Alpaca Broker Integration | **Implemented** — order execution and historical data client both built | [03 Backend Engineer](03_BACKEND_ENGINEER.md) | `broker/order_executor.py`; `broker/alpaca_client.py` (adapter over `src/market_data`) |
-| Feature Engineering Platform | **Implemented** (39-feature causal registry, `FeaturePipeline`, `FeatureVector`, manifest); `FeatureVector` contract frozen at v2 (with `provenance`); not yet wired to any consumer | [04 Quant Researcher](04_QUANT_RESEARCHER.md) | `src/features/` — see [ADR-003](Architecture/ADR/ADR-003-Feature-Engineering.md), [ADR-004](Architecture/ADR/ADR-004-FeatureVector-Contract-Freeze.md) (contract freeze), and [ADR-005](Architecture/ADR/ADR-005-FeatureVector-Provenance.md) (provenance, v1→v2); binding spec: [Standards/FeatureVector Contract.md](Standards/FeatureVector%20Contract.md). `regime-trader/data/feature_engineering.py` remains the live path until Milestone 4 re-points the HMM at this pipeline. |
+| Feature Engineering Platform | **Implemented** (39-feature causal registry, `FeaturePipeline`, `FeatureVector`, manifest); `FeatureVector` contract frozen at v2 (with `provenance`); consumed by `src/hmm/`, not yet by anything in `regime-trader/` | [04 Quant Researcher](04_QUANT_RESEARCHER.md) | `src/features/` — see [ADR-003](Architecture/ADR/ADR-003-Feature-Engineering.md), [ADR-004](Architecture/ADR/ADR-004-FeatureVector-Contract-Freeze.md) (contract freeze), and [ADR-005](Architecture/ADR/ADR-005-FeatureVector-Provenance.md) (provenance, v1→v2); binding spec: [Standards/FeatureVector Contract.md](Standards/FeatureVector%20Contract.md). `regime-trader/data/feature_engineering.py` remains the live path until a milestone re-points the live HMM at this pipeline. |
+| HMM & Regime Detection Platform | **Implemented** (deterministic Gaussian HMM: normalization, training, BIC/AIC model selection, causal forward-algorithm inference, filesystem persistence, `RegimeService`); `RegimeState` contract frozen at v1; not yet wired to any consumer or to `main.py.ModelStore` | [04 Quant Researcher](04_QUANT_RESEARCHER.md) | `src/hmm/` — see [ADR-006](Architecture/ADR/ADR-006-RegimeState-Contract.md) (contract freeze) and [ADR-007](Architecture/ADR/ADR-007-HMM-Design.md) (design); binding spec: [Standards/RegimeState Contract.md](Standards/RegimeState%20Contract.md). `core/hmm_engine.py` remains the live path — see the "HMM Regime Detection (live)" row above. |
 | Backtesting Framework | **Implemented** (crypto SMA baseline); **planned** (regime-aware equity backtester) | [04 Quant Researcher](04_QUANT_RESEARCHER.md) | `backtest/` |
 | Risk Management & Circuit Breakers | **Implemented** | [08 Risk Manager](08_RISK_MANAGER.md) | `core/risk_manager.py` |
 | Production Deployment | **Implemented** (process lifecycle); **planned** (orchestration, model serving, drift monitoring) | [12 DevOps Engineer](12_DEVOPS_ENGINEER.md) | `main.py` lifecycle; see [Architecture/Production Deployment.md](Architecture/Production%20Deployment.md) |
@@ -169,6 +170,15 @@ without updating every such reference.
    A breaking change requires a `PIPELINE_VERSION` bump and a new ADR, not
    an in-place redefinition — every consumer (HMM, backtesting, adaptive
    learning, NLP, risk) depends on this contract staying stable.
+10. **The `RegimeState` contract is frozen — extend it, never silently
+    change it.** Required fields, metadata keys, and versioning rules are
+    binding as of
+    [ADR-006](Architecture/ADR/ADR-006-RegimeState-Contract.md); full
+    detail in
+    [Standards/RegimeState Contract.md](Standards/RegimeState%20Contract.md).
+    `hmm.service.RegimeService` never exposes `hmmlearn` internals, a raw
+    feature matrix, or a normalizer outside the `hmm` package — every
+    consumer reads `RegimeState`, never `hmm` internals directly.
 
 ## 5. Repository Structure
 
@@ -189,9 +199,18 @@ sukyTradinBot/
 │                                   at config/feature_manifest.yaml — depends on
 │                                   src/market_data for bar cleaning/validation reuse, not the
 │                                   reverse; see Architecture/ADR/ADR-003-Feature-Engineering.md
+├── src/hmm/                       HMM & regime detection (Milestone 4): deterministic Gaussian
+│                                   HMM engine — normalization, training, BIC/AIC model
+│                                   selection, causal forward-algorithm inference, filesystem
+│                                   persistence, all behind RegimeService — consumes only
+│                                   FeatureVector, produces only the canonical RegimeState
+│                                   output; depends on src/features (never src/market_data
+│                                   directly — this package never touches a raw bar); see
+│                                   Architecture/ADR/ADR-007-HMM-Design.md
 ├── tests/common/                  tests for src/common
 ├── tests/market_data/             tests for src/market_data
 ├── tests/features/                tests for src/features
+├── tests/hmm/                     tests for src/hmm
 ├── tests/regime_trader/           contract tests for the regime-trader/ <-> src/market_data
 │                                   adapter (see below) — the one exception to "tests/
 │                                   mirrors src/", since regime-trader/ isn't a package
