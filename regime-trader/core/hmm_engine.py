@@ -126,12 +126,20 @@ def fit_with_bic_selection(
 
 
 def _log_emission_matrix(X: np.ndarray, means: np.ndarray, covars: np.ndarray) -> np.ndarray:
-    """log N(x_t; mu_i, Sigma_i) for every (t, i). Shape (n_samples, n_components)."""
+    """log N(x_t; mu_i, Sigma_i) for every (t, i). Shape (n_samples, n_components).
+
+    `allow_singular=True` -- a fitted component's covariance can be exactly
+    singular (e.g. a constant feature collapses every observation to the
+    same point, giving a rank-deficient sample covariance). scipy's default
+    (`False`) raises `LinAlgError` in that case; `True` falls back to the
+    Moore-Penrose pseudo-inverse, the standard way to evaluate a degenerate
+    Gaussian's density, and is a no-op for the common well-conditioned case.
+    """
     n_samples = X.shape[0]
     n_components = means.shape[0]
     log_b = np.empty((n_samples, n_components))
     for i in range(n_components):
-        log_b[:, i] = multivariate_normal.logpdf(X, mean=means[i], cov=covars[i])
+        log_b[:, i] = multivariate_normal.logpdf(X, mean=means[i], cov=covars[i], allow_singular=True)
     return log_b
 
 
