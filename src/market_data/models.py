@@ -22,19 +22,10 @@ causal-ordering bugs).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from enum import Enum
 
-
-def _require_utc(timestamp: datetime, *, field_name: str = "timestamp") -> None:
-    if timestamp.tzinfo is None:
-        raise ValueError(f"{field_name} must be timezone-aware, got naive datetime {timestamp!r}")
-    if timestamp.utcoffset() != timezone.utc.utcoffset(None):
-        raise ValueError(
-            f"{field_name} must be normalized to UTC, got offset "
-            f"{timestamp.utcoffset()} for {timestamp!r}. "
-            "See validation.normalize_timezone."
-        )
+from common.time import require_utc as _require_utc
 
 
 class Timeframe(str, Enum):
@@ -74,7 +65,7 @@ class Bar:
     vwap: float | None = None
 
     def __post_init__(self) -> None:
-        _require_utc(self.timestamp)
+        _require_utc(self.timestamp, "timestamp")
         if self.volume < 0:
             raise ValueError(f"volume must be >= 0, got {self.volume}")
         if self.high < max(self.open, self.close, self.low):
@@ -102,7 +93,7 @@ class Trade:
     conditions: tuple[str, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
-        _require_utc(self.timestamp)
+        _require_utc(self.timestamp, "timestamp")
         if self.price <= 0:
             raise ValueError(f"price must be > 0, got {self.price}")
         if self.size <= 0:
@@ -129,7 +120,7 @@ class Quote:
     ask_exchange: str = ""
 
     def __post_init__(self) -> None:
-        _require_utc(self.timestamp)
+        _require_utc(self.timestamp, "timestamp")
         for name, value in (
             ("bid_price", self.bid_price),
             ("bid_size", self.bid_size),
@@ -164,7 +155,7 @@ class OrderBook:
     asks: tuple[PriceLevel, ...]
 
     def __post_init__(self) -> None:
-        _require_utc(self.timestamp)
+        _require_utc(self.timestamp, "timestamp")
 
     @property
     def best_bid(self) -> PriceLevel | None:
@@ -191,7 +182,7 @@ class Snapshot:
     previous_daily_bar: Bar | None = None
 
     def __post_init__(self) -> None:
-        _require_utc(self.timestamp)
+        _require_utc(self.timestamp, "timestamp")
 
 
 @dataclass(frozen=True)
@@ -211,7 +202,7 @@ class CorporateAction:
     description: str = ""
 
     def __post_init__(self) -> None:
-        _require_utc(self.ex_date, field_name="ex_date")
+        _require_utc(self.ex_date, "ex_date")
         if self.action_type == CorporateActionType.SPLIT and not self.ratio:
             raise ValueError(f"SPLIT action for {self.symbol} requires a ratio")
         if self.action_type == CorporateActionType.DIVIDEND and self.cash_amount is None:

@@ -1,0 +1,14 @@
+{
+  "tag": "v0.5-strategy-engine",
+  "date": "2026-07-12",
+  "python_version": "3.9.6",
+  "platform": "darwin",
+  "dataset": "single synthetic FeatureVector + RegimeState pair, dispatched through a 3-strategy registry (growth/bear/defensive-as-fallback) via StrategyService.decide, called 10,000 times",
+  "source": "tests/strategy/test_performance.py's scenario, re-run standalone with resource.getrusage wrapped around the same StrategyService.decide loop",
+  "decide_ms_per_call": 0.0096,
+  "memory_mb": 149.22,
+  "known_gaps": [
+    "decide_ms_per_call measures pure in-memory dispatch (registry lookup + a multiplication) -- no I/O, no model inference. Not comparable to hmm's inference_ms_per_call (~20.9ms in v0.4-hmm-regime-detection.json), which re-runs a batch Forward Algorithm; the two milestones measure fundamentally different operations.",
+    "memory_mb is whole-process peak RSS including numpy/scipy/hmmlearn/pandas import overhead pulled in transitively via features/hmm, not the incremental cost of strategy dispatch alone -- see benchmarks/README.md's methodology note. Comparable to v0.4's 151.8mb for the same reason (same import graph), not evidence the Strategy Engine itself has any meaningful memory footprint."
+  ]
+}

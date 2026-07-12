@@ -127,3 +127,15 @@ def test_metadata_round_trips_through_dict() -> None:
     metadata = _metadata()
     restored = ModelMetadata.from_dict(metadata.to_dict())
     assert restored == metadata
+
+
+def test_regime_state_round_trips_through_dict() -> None:
+    state = _state(metadata={"regime_probabilities": [0.1, 0.9], "n_states": 2})
+    assert RegimeState.from_dict(state.to_dict()) == state
+
+
+def test_regime_state_to_dict_is_json_serializable() -> None:
+    import json
+
+    state = _state()
+    json.dumps(state.to_dict())
