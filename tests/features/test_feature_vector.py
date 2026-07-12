@@ -4,12 +4,24 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from features.feature_vector import FeatureVector
+from features.feature_vector import FeatureVector, Provenance
 
 UTC = timezone.utc
 NAIVE = datetime(2024, 1, 1)
 AWARE = datetime(2024, 1, 1, tzinfo=UTC)
 NON_UTC = datetime(2024, 1, 1, tzinfo=timezone(timedelta(hours=-5)))
+
+
+def _provenance(**overrides: object) -> Provenance:
+    defaults: dict[str, object] = {
+        "pipeline_version": "2",
+        "manifest_version": "1",
+        "feature_versions": {"a": 1, "b": 1},
+        "generated_at": AWARE,
+        "source_dataset": "test",
+    }
+    defaults.update(overrides)
+    return Provenance(**defaults)  # type: ignore[arg-type]
 
 
 def _vector(**overrides: object) -> FeatureVector:
@@ -18,9 +30,9 @@ def _vector(**overrides: object) -> FeatureVector:
         "symbol": "AAPL",
         "feature_values": (1.0, 2.0),
         "feature_names": ("a", "b"),
-        "metadata": {"source": "test"},
+        "metadata": {},
         "quality_flags": {},
-        "version": "1",
+        "provenance": _provenance(),
     }
     defaults.update(overrides)
     return FeatureVector(**defaults)  # type: ignore[arg-type]
@@ -82,3 +94,39 @@ def test_is_frozen() -> None:
     vec = _vector()
     with pytest.raises(FrozenInstanceError):
         vec.symbol = "MSFT"  # type: ignore[misc]
+
+
+def test_provenance_is_accessible_on_the_vector() -> None:
+    vec = _vector()
+    assert vec.provenance.pipeline_version == "2"
+    assert vec.provenance.manifest_version == "1"
+    assert vec.provenance.feature_versions == {"a": 1, "b": 1}
+    assert vec.provenance.source_dataset == "test"
+
+
+def test_rejects_provenance_feature_versions_missing_a_feature() -> None:
+    with pytest.raises(ValueError, match=r"provenance\.feature_versions"):
+        _vector(provenance=_provenance(feature_versions={"a": 1}))
+
+
+def test_rejects_provenance_feature_versions_with_extra_feature() -> None:
+    with pytest.raises(ValueError, match=r"provenance\.feature_versions"):
+        _vector(provenance=_provenance(feature_versions={"a": 1, "b": 1, "c": 1}))
+
+
+def test_provenance_rejects_naive_generated_at() -> None:
+    with pytest.raises(ValueError, match="timezone-aware"):
+        _provenance(generated_at=NAIVE)
+
+
+def test_provenance_rejects_non_utc_generated_at() -> None:
+    with pytest.raises(ValueError, match="UTC"):
+        _provenance(generated_at=NON_UTC)
+
+
+def test_provenance_is_frozen() -> None:
+    from dataclasses import FrozenInstanceError
+
+    prov = _provenance()
+    with pytest.raises(FrozenInstanceError):
+        prov.source_dataset = "other"  # type: ignore[misc]

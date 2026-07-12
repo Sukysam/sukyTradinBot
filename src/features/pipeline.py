@@ -23,14 +23,19 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from common.interfaces import Clock
+from common.time import SystemClock
 from features.errors import InsufficientHistoryError
-from features.feature_vector import FeatureVector
+from features.feature_vector import FeatureVector, Provenance
+from features.manifest import MANIFEST_SCHEMA_VERSION
 from features.registry import DEFAULT_REGISTRY, FeatureRegistry
 from features.validation import compute_quality_flags, validate_feature_output
 from market_data.models import Bar, CorporateAction
 from market_data.validation import apply_split_adjustment, deduplicate_bars, validate_bars
 
-PIPELINE_VERSION = "1"
+# Bumped 1 -> 2 when `Provenance` was added as a required field -- see
+# docs/engineering-handbook/Architecture/ADR/ADR-005-FeatureVector-Provenance.md.
+PIPELINE_VERSION = "2"
 
 _OHLCV_COLUMNS = ["open", "high", "low", "close", "volume"]
 
@@ -77,8 +82,9 @@ class FeaturePipeline:
     integrity problem, not a market condition.
     """
 
-    def __init__(self, registry: FeatureRegistry | None = None) -> None:
+    def __init__(self, registry: FeatureRegistry | None = None, clock: Clock | None = None) -> None:
         self.registry = registry or DEFAULT_REGISTRY
+        self._clock = clock or SystemClock()
 
     def _prepare(
         self, bars: Sequence[Bar], corporate_actions: Sequence[CorporateAction]
@@ -124,7 +130,7 @@ class FeaturePipeline:
         *,
         corporate_actions: Sequence[CorporateAction] = (),
         feature_names: Sequence[str] | None = None,
-        source: str = "unspecified",
+        source_dataset: str = "unspecified",
     ) -> tuple[list[FeatureVector], PipelineDiagnostics]:
         """One `FeatureVector` per input bar (after cleaning/dedup), in
         ascending timestamp order. Early rows will have flagged/`NaN`
@@ -143,13 +149,22 @@ class FeaturePipeline:
         values_matrix = feature_df.to_numpy(dtype="float64")
         flags_matrix = flags_df.to_numpy(dtype="bool")
         timestamps = df["timestamp"].tolist()
-        metadata_base = {
-            "pipeline_version": PIPELINE_VERSION,
-            "source": source,
-            "n_bars_used": len(df),
-        }
+        metadata_base = {"n_bars_used": len(df)}
 
         feature_name_tuple = tuple(feature_df.columns)
+        # One wall-clock read for the whole batch, not per vector -- every
+        # vector produced by this call was generated as part of the same
+        # pipeline run, so they share one `generated_at`.
+        generated_at = self._clock.now()
+        feature_versions = {name: self.registry.get(name).version for name in feature_name_tuple}
+        provenance = Provenance(
+            pipeline_version=PIPELINE_VERSION,
+            manifest_version=MANIFEST_SCHEMA_VERSION,
+            feature_versions=feature_versions,
+            generated_at=generated_at,
+            source_dataset=source_dataset,
+        )
+
         vectors = []
         for i in range(len(df)):
             flags = {
@@ -165,7 +180,7 @@ class FeaturePipeline:
                     feature_names=feature_name_tuple,
                     metadata=dict(metadata_base),
                     quality_flags=flags,
-                    version=PIPELINE_VERSION,
+                    provenance=provenance,
                 )
             )
         return vectors, diagnostics
@@ -177,7 +192,7 @@ class FeaturePipeline:
         *,
         corporate_actions: Sequence[CorporateAction] = (),
         feature_names: Sequence[str] | None = None,
-        source: str = "unspecified",
+        source_dataset: str = "unspecified",
         strict: bool = False,
     ) -> FeatureVector:
         """The single most recent `FeatureVector` — the live-trading
@@ -191,7 +206,7 @@ class FeaturePipeline:
             symbol,
             corporate_actions=corporate_actions,
             feature_names=feature_names,
-            source=source,
+            source_dataset=source_dataset,
         )
         latest = vectors[-1]
         if strict and latest.has_any_flag:
