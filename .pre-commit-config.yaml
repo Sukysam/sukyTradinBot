@@ -1,7 +1,7 @@
-# Foundation-scoped pre-commit hooks (Milestone 1). Ruff/Black/MyPy are
-# scoped to src/ and tests/ only — see the tooling-scope note in
-# docs/engineering-handbook/Architecture/Known Gaps.md for why
-# regime-trader/ and backtest/ aren't yet under this pipeline.
+# Ruff/Black/MyPy are scoped to src/, tests/, and one Milestone 2
+# exception (regime-trader/broker/alpaca_client.py) — see the tooling-scope
+# note in docs/engineering-handbook/Architecture/Known Gaps.md for why the
+# rest of regime-trader/ and backtest/ aren't yet under this pipeline.
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -22,19 +22,19 @@ repos:
     hooks:
       - id: ruff
         args: ["--fix"]
-        files: ^(src|tests)/
+        files: ^(src|tests)/|^regime-trader/broker/alpaca_client\.py$
 
   - repo: https://github.com/psf/black
     rev: 24.4.2
     hooks:
       - id: black
-        files: ^(src|tests)/
+        files: ^(src|tests)/|^regime-trader/broker/alpaca_client\.py$
 
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.10.0
     hooks:
       - id: mypy
-        files: ^src/
+        files: ^src/|^regime-trader/broker/alpaca_client\.py$
         additional_dependencies:
           - pydantic>=2.5
           - pydantic-settings>=2.1

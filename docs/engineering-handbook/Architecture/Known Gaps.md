@@ -25,15 +25,6 @@ sector map). Acceptable in paper trading; **blocking for live** per
 [SOPs/Release Workflow.md](../SOPs/Release%20Workflow.md). Owner:
 [02_TECHNICAL_PLANNER.md](../02_TECHNICAL_PLANNER.md) / [System Architect](../01_SYSTEM_ARCHITECT.md).
 
-### 2. `broker/alpaca_client.py` — historical bar fetching
-Satisfies `main.py.MarketDataProvider`: `get_ohlcv_history(ticker,
-lookback_days) -> pd.DataFrame`. Must return an ascending-time-indexed
-DataFrame with columns `['open','high','low','close','volume']` — the exact
-contract `feature_engineering.build_feature_matrix` expects, currently
-unchecked at the boundary. Blocks the entire structural loop, and blocks
-backfilling real equity data for HMM training and regime-aware
-backtesting. Owner: [03_BACKEND_ENGINEER.md](../03_BACKEND_ENGINEER.md).
-
 ### 3. A trained-HMM-model store
 Satisfies `main.py.ModelStore`: `get_model(ticker) -> GaussianHMM`.
 Persistence and refresh cadence for `hmm_engine.GaussianHMM` fits is **not
@@ -74,11 +65,13 @@ items 2 and 3. Owner: [04_QUANT_RESEARCHER.md](../04_QUANT_RESEARCHER.md).
 
 ## How a gap is wired today
 
-Items 1–4 above are (or, for item 4, will be) injected into
+Items 1, 3, and 4 above are (or, for item 4, will be) injected into
 `RegimeTraderApp` in `main.py`'s `main()` function as
 `_NotYetImplemented(missing_component_description)` instances, whose
 `__getattr__` raises `NotImplementedError` the moment the structural loop
-actually calls a method on it. This means:
+actually calls a method on it — item 2 was wired this way until Milestone
+2 replaced its placeholder with a real implementation (see Resolved gaps
+below). This means:
 
 - Running `main()` today starts cleanly and fails loudly and specifically
   the first time the structural loop needs one of these, rather than
@@ -92,7 +85,7 @@ Items 5 and 6 are not `Protocol`-wired dependencies of `main.py` — they are
 downstream capabilities that simply don't exist as modules yet. Their
 "not implemented" state is tracked here, not via a runtime placeholder.
 
-## Tooling scope (Milestone 1: Foundation)
+## Tooling scope (Milestone 1: Foundation; updated Milestone 2)
 
 Milestone 1 added real packaging and tooling — `pyproject.toml`, Ruff,
 Black, MyPy, Pytest, pre-commit, GitHub Actions CI, and a Docker/Compose
@@ -108,27 +101,43 @@ become permanent:
   brought into compliance in the same change would also have produced a
   red CI/pre-commit state on day one, which is worse than no coverage.
 - **What this means today**: `ruff check`, `black --check`, `mypy`, and
-  the GitHub Actions `lint`/`typecheck`/`test` jobs only look at `src/`
-  and `tests/`. A change to `regime-trader/` or `backtest/` today gets no
-  automated lint/format/type coverage, and pre-commit's Ruff/Black/MyPy
-  hooks are scoped with `files: ^(src|tests)/` for the same reason.
-- **Owner / next step**: bringing `regime-trader/` and `backtest/` under
-  this same tooling — likely requiring a one-time formatting/lint-fix pass
-  reviewed on its own, separate from any behavioral change — is future
-  work, not yet assigned to a specific build-order item above. Whoever
-  picks it up should update this note and
+  the GitHub Actions `lint`/`typecheck`/`test` jobs look at `src/` and
+  `tests/`, plus one explicit exception added in Milestone 2:
+  `regime-trader/broker/alpaca_client.py` (new code, not pre-existing —
+  see [ADR-002](ADR/ADR-002-Market-Data.md) Decision 5). Every other file
+  under `regime-trader/` or `backtest/` still gets no automated
+  lint/format/type coverage; pre-commit's Ruff/Black/MyPy hooks are scoped
+  with `files: ^(src|tests)/|^regime-trader/broker/alpaca_client\.py$` for
+  the same reason.
+- **Owner / next step**: bringing the rest of `regime-trader/` and
+  `backtest/` under this same tooling — likely requiring a one-time
+  formatting/lint-fix pass reviewed on its own, separate from any
+  behavioral change — is future work, not yet assigned to a specific
+  build-order item above. Whoever picks it up should update this note and
   [02_TECHNICAL_PLANNER.md](../02_TECHNICAL_PLANNER.md)'s build order
   rather than silently expanding tool scope in an unrelated PR.
 - **Dependency separation**: `pyproject.toml` declares `regime-trader/`'s
-  runtime dependencies (pandas, numpy, scipy, hmmlearn, torch,
-  transformers, ta, alpaca-py) under the optional `trading` extra rather
-  than as base dependencies of `src/common`, since `common` imports none
-  of them — installing the foundation package alone (`pip install -e .`
-  or `pip install -e ".[dev]"`) never pulls in trading-platform
-  dependencies.
+  full runtime dependency set (pandas, numpy, scipy, hmmlearn, torch,
+  transformers, ta, alpaca-py) under the optional `trading` extra, and a
+  narrower `market-data` extra (pandas, numpy, pyarrow, duckdb, alpaca-py)
+  for `src/market_data` specifically — see
+  [ADR-002](ADR/ADR-002-Market-Data.md) Decision 4. Neither is a base
+  dependency of `src/common`; installing the foundation package alone
+  (`pip install -e .` or `pip install -e ".[dev]"`) never pulls in either.
 
 ## Resolved gaps
 
-*(none yet — move an entry here, with the PR/date and a link to the
-closing PR, when a gap above is fully implemented and matches its
-`Protocol` contract or, for items 5–6, its target architecture doc)*
+### `broker/alpaca_client.py` — historical bar fetching (was item 2)
+Closed in Milestone 2. `regime-trader/broker/alpaca_client.py`'s
+`AlpacaMarketDataClient` satisfies `main.py.MarketDataProvider` as a thin
+adapter over the new `market_data` package's `AlpacaHistoricalProvider`
+— see [ADR-002](ADR/ADR-002-Market-Data.md) Decisions 1 and 5 for the
+full design, and `tests/regime_trader/test_alpaca_client_adapter.py` for
+the contract test verifying the ascending-index/exact-columns/no-NaN-gaps
+requirements this gap's entry originally specified. `main.py` now
+constructs `AlpacaMarketDataClient()` in place of the previous
+`_NotYetImplemented(...)` placeholder.
+
+*(the remaining open items above keep their original numbers 1, 3–6 — not
+renumbered, to avoid rippling through every cross-reference to them
+elsewhere in this handbook; see this file's own header note)*

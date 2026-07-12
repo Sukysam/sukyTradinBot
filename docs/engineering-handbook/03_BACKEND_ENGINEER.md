@@ -12,7 +12,8 @@ decision once both have signed off.
 
 | Capability | This role's responsibility |
 |---|---|
-| Alpaca Broker Integration | Full ownership of the implementation (order execution done; historical data client planned) |
+| Alpaca Broker Integration | Full ownership of the implementation (order execution and historical data client both built) |
+| Market Data Platform | Owns the `regime-trader/broker/alpaca_client.py` adapter; the platform itself (`src/market_data/`) is shared infrastructure, not exclusive to this role — see [ADR-002](Architecture/ADR/ADR-002-Market-Data.md) |
 | Event-Driven Execution | Implements the transport side (news WebSocket) and the lifecycle wiring; shape owned by System Architect |
 
 ## Owns
@@ -21,8 +22,14 @@ decision once both have signed off.
   submission via `alpaca-py`.
 - `broker/news_streamer.py` — the Alpaca News WebSocket transport, the
   event source for the event-driven execution pipeline.
-- `broker/alpaca_client.py` — **not yet built**; historical OHLCV fetching.
-  Top backend priority per [Technical Planner](02_TECHNICAL_PLANNER.md).
+- `broker/alpaca_client.py` — historical OHLCV fetching, satisfying
+  `main.py.MarketDataProvider`. Built in Milestone 2 as a thin adapter over
+  `src/market_data`'s `AlpacaHistoricalProvider` — see
+  [ADR-002](Architecture/ADR/ADR-002-Market-Data.md) Decision 5. This file
+  is the *only* part of `regime-trader/` under this repository's own
+  Ruff/Black/MyPy/CI tooling (see the tooling-scope note in
+  [Architecture/Known Gaps.md](Architecture/Known%20Gaps.md)) — any change
+  to it must still pass those checks, unlike the rest of `regime-trader/`.
 - `main.py`'s lifecycle code (`run`, `_shutdown`, signal handling, task
   wiring) — not its `Protocol` contracts, which belong to
   [System Architect](01_SYSTEM_ARCHITECT.md).
@@ -52,10 +59,12 @@ decision once both have signed off.
   mocks `TradingClient` and asserts: correct `OrderClass` (OTO vs.
   BRACKET) selection, correct whole-share truncation, and rejection when
   `stop_price >= entry_price` or `take_profit_price <= entry_price`.
-- `alpaca_client.py`, once built, ships with a contract test asserting its
-  return value satisfies `MarketDataProvider`: ascending time index,
-  exactly the columns `['open','high','low','close','volume']`, no
-  silent NaN gaps within the requested lookback window.
+- `alpaca_client.py`'s return value satisfies `MarketDataProvider`:
+  ascending time index, exactly the columns
+  `['open','high','low','close','volume']`, no silent NaN gaps within the
+  requested lookback window — enforced by
+  `tests/regime_trader/test_alpaca_client_adapter.py`, which any change to
+  this file must keep passing.
 - No PR merges that calls a blocking `alpaca-py` or `NewsDataStream` method
   directly inside an `async def` without `asyncio.to_thread`.
 - Every new broker-layer exception path logs at a severity matching its

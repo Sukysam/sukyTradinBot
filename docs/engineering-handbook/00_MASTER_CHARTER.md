@@ -75,7 +75,8 @@ anyone should look to answer "is X actually built yet."
 | SHAP Trade Attribution | **Planned** | [04 Quant Researcher](04_QUANT_RESEARCHER.md) (build) / [07 Signal Orchestrator](07_SIGNAL_ORCHESTRATOR.md) (integrate) / [11 Documentation Engineer](11_DOCUMENTATION_ENGINEER.md) (audit trail) | `core/attribution.py` (not yet built) |
 | FinBERT NLP News Engine | **Implemented** | [06 NLP Engineer](06_NLP_ENGINEER.md) | `core/sentiment_engine.py` |
 | Event-Driven Execution | **Implemented** | [01 System Architect](01_SYSTEM_ARCHITECT.md) / [03 Backend Engineer](03_BACKEND_ENGINEER.md) | `main.py` (structural + news pipelines), `broker/news_streamer.py` |
-| Alpaca Broker Integration | **Partial** — order execution implemented; historical data client not yet built | [03 Backend Engineer](03_BACKEND_ENGINEER.md) | `broker/order_executor.py`; `broker/alpaca_client.py` (not yet built) |
+| Market Data Platform | **Implemented** (historical + streaming, Parquet/DuckDB storage, validation, replay) | [03 Backend Engineer](03_BACKEND_ENGINEER.md) | `src/market_data/` — see [ADR-002](Architecture/ADR/ADR-002-Market-Data.md) |
+| Alpaca Broker Integration | **Implemented** — order execution and historical data client both built | [03 Backend Engineer](03_BACKEND_ENGINEER.md) | `broker/order_executor.py`; `broker/alpaca_client.py` (adapter over `src/market_data`) |
 | Backtesting Framework | **Implemented** (crypto SMA baseline); **planned** (regime-aware equity backtester) | [04 Quant Researcher](04_QUANT_RESEARCHER.md) | `backtest/` |
 | Risk Management & Circuit Breakers | **Implemented** | [08 Risk Manager](08_RISK_MANAGER.md) | `core/risk_manager.py` |
 | Production Deployment | **Implemented** (process lifecycle); **planned** (orchestration, model serving, drift monitoring) | [12 DevOps Engineer](12_DEVOPS_ENGINEER.md) | `main.py` lifecycle; see [Architecture/Production Deployment.md](Architecture/Production%20Deployment.md) |
@@ -166,12 +167,23 @@ sukyTradinBot/
 │                                   logging, base interfaces, common utilities — no
 │                                   trading logic; see the tooling-scope note in
 │                                   Architecture/Known Gaps.md
+├── src/market_data/               market data platform (Milestone 2): provider-agnostic
+│                                   models/interfaces, Alpaca historical + streaming
+│                                   providers, Parquet/DuckDB storage, validation, replay
+│                                   harness — see Architecture/ADR/ADR-002-Market-Data.md
 ├── tests/common/                  tests for src/common
+├── tests/market_data/             tests for src/market_data
+├── tests/regime_trader/           contract tests for the regime-trader/ <-> src/market_data
+│                                   adapter (see below) — the one exception to "tests/
+│                                   mirrors src/", since regime-trader/ isn't a package
 │
 ├── regime-trader/                 the production trading platform
 │   ├── main.py                    orchestration: three concurrent pipelines under one asyncio loop
 │   ├── core/                      HMM engine, risk manager, sentiment engine, learning engine
-│   ├── broker/                    Alpaca order execution and news streaming
+│   ├── broker/                    Alpaca order execution, news streaming, and (Milestone 2)
+│   │                               alpaca_client.py — a thin adapter over src/market_data,
+│   │                               the one file here under this repo's own tooling; see
+│   │                               the tooling-scope note in Architecture/Known Gaps.md
 │   └── data/                      feature engineering (strictly causal transforms)
 │
 ├── backtest/                      standalone crypto SMA-crossover research sandbox
@@ -332,6 +344,12 @@ which in practice often means never.
   [Knowledge Base/Spec Section Index.md](Knowledge%20Base/Spec%20Section%20Index.md))
   and explains any non-obvious design decision. A docstring that only
   restates the class/function names below it is not pulling its weight.
+- **Significant, hard-to-reverse decisions get an Architecture Decision
+  Record.** See [Architecture/ADR/README.md](Architecture/ADR/README.md)
+  for when one is warranted and the format to use. A docstring explains
+  why a module is shaped the way it is; an ADR explains why the codebase
+  as a whole made a foundational choice — the two operate at different
+  altitudes and neither substitutes for the other.
 - **This handbook is versioned with the code it describes.** Documentation
   changes ship in the same PR as the code change that motivates them.
 - **Distinguish verified from reconstructed.** Any claim about an external

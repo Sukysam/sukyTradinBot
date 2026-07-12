@@ -1,9 +1,11 @@
 name: CI
 
-# Foundation-scoped CI (Milestone 1). Lint/format/type-check/test only
-# src/ and tests/ (the `common` package) — regime-trader/ and backtest/
-# are deliberately not yet under this pipeline. See the tooling-scope note
-# in docs/engineering-handbook/Architecture/Known Gaps.md.
+# Lint/format/type-check/test the src/ + tests/ tree (the `common` and
+# `market_data` packages), plus the one Milestone 2 exception:
+# regime-trader/broker/alpaca_client.py, passed explicitly alongside
+# `src tests` below. The rest of regime-trader/ and backtest/ remain
+# deliberately outside this pipeline — see the tooling-scope note in
+# docs/engineering-handbook/Architecture/Known Gaps.md.
 
 on:
   push:
@@ -15,6 +17,9 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  ADAPTER_FILE: regime-trader/broker/alpaca_client.py
+
 jobs:
   lint:
     name: Lint & format check
@@ -25,12 +30,12 @@ jobs:
         with:
           python-version: "3.11"
           cache: "pip"
-      - name: Install dev dependencies
-        run: pip install -e ".[dev]"
+      - name: Install dev + market-data dependencies
+        run: pip install -e ".[dev,market-data]"
       - name: Ruff
-        run: ruff check src tests
+        run: ruff check src tests "$ADAPTER_FILE"
       - name: Black (check only)
-        run: black --check src tests
+        run: black --check src tests "$ADAPTER_FILE"
 
   typecheck:
     name: Type check
@@ -41,8 +46,8 @@ jobs:
         with:
           python-version: "3.11"
           cache: "pip"
-      - name: Install dev dependencies
-        run: pip install -e ".[dev]"
+      - name: Install dev + market-data dependencies
+        run: pip install -e ".[dev,market-data]"
       - name: MyPy
         run: mypy
 
@@ -58,8 +63,8 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
           cache: "pip"
-      - name: Install dev dependencies
-        run: pip install -e ".[dev]"
+      - name: Install dev + market-data dependencies
+        run: pip install -e ".[dev,market-data]"
       - name: Pytest
         run: pytest
 

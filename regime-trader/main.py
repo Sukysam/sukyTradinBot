@@ -40,6 +40,7 @@ import numpy as np
 import pandas as pd
 from alpaca.trading.client import TradingClient
 
+from broker.alpaca_client import AlpacaMarketDataClient
 from broker.news_streamer import NewsItem, NewsStreamer
 from broker.order_executor import OrderExecutor
 from core.hmm_engine import ForwardFilter
@@ -508,7 +509,7 @@ def main() -> None:
         tickers=tickers,
         sectors={},  # TODO: populate from config/settings.yaml once it exists
         trading_client=trading_client,
-        market_data=_NotYetImplemented("broker/alpaca_client.py (historical bar fetching)"),
+        market_data=AlpacaMarketDataClient(),
         model_store=_NotYetImplemented("a trained-HMM-model store (persistence isn't specified in the spec)"),
         signal_generator=_NotYetImplemented("core/signal_generator.py + core/regime_strategies.py"),
         order_executor=OrderExecutor(trading_client),

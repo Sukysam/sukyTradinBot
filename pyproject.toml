@@ -47,10 +47,24 @@ dev = [
     "pre-commit>=3.7",
     "types-PyYAML",
 ]
+# Runtime dependencies of `src/market_data` (Milestone 2) — a real,
+# first-party package under this same tooling, unlike `trading` below. See
+# docs/engineering-handbook/Architecture/ADR/ADR-002-Market-Data.md
+# "Decision 5" for why this is split out from `trading` rather than folded
+# into it: market_data needs none of `trading`'s HMM/NLP-specific weight
+# (scipy, hmmlearn, torch, transformers, ta).
+market-data = [
+    "pandas>=2.0",
+    "numpy>=1.26",
+    "pyarrow>=14.0",
+    "duckdb>=0.10",
+    "alpaca-py>=0.13",
+]
 # Runtime dependencies of the pre-existing regime-trader/ and backtest/ code
 # trees, declared here for installability and documentation purposes only —
-# Milestone 1 does not build, modify, or exercise any code that imports
-# these. See docs/engineering-handbook/Architecture/Known Gaps.md.
+# regime-trader/'s own trading logic (core/, broker/ minus the Milestone 2
+# adapter) remains untouched by this repository's own tooling. See
+# docs/engineering-handbook/Architecture/Known Gaps.md.
 trading = [
     "pandas>=2.0",
     "numpy>=1.26",
@@ -64,17 +78,22 @@ trading = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["common*"]
+include = ["common*", "market_data*"]
 
 [tool.setuptools.package-data]
 common = ["py.typed"]
+market_data = ["py.typed"]
 
 # --------------------------------------------------------------------------
-# Ruff (lint + import sort). Scoped to the foundation package and its tests
-# only — see the tooling-scope note in
+# Ruff (lint + import sort). Scoped to the foundation/market-data packages
+# and their tests — see the tooling-scope note in
 # docs/engineering-handbook/Architecture/Known Gaps.md for why
-# regime-trader/ and backtest/ are deliberately excluded for now rather than
-# silently reformatted or lint-fixed as a side effect of this milestone.
+# regime-trader/ and backtest/ are otherwise excluded. The one deliberate
+# exception, regime-trader/broker/alpaca_client.py (Milestone 2's new
+# adapter), is checked explicitly by CI/pre-commit passing its path
+# alongside `src tests` — an explicit path always overrides `extend-exclude`
+# for Ruff, Black, and MyPy alike (verified against this repo's own
+# tooling), so no change to `extend-exclude` itself is needed for that.
 # --------------------------------------------------------------------------
 [tool.ruff]
 line-length = 100
@@ -98,7 +117,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["common"]
+known-first-party = ["common", "market_data"]
 
 [tool.ruff.format]
 # Formatting is Black's responsibility (see [tool.black] below); Ruff is
@@ -106,7 +125,10 @@ known-first-party = ["common"]
 # the same file.
 
 # --------------------------------------------------------------------------
-# Black (formatting). Same scope note as Ruff above.
+# Black (formatting). Same scope note as Ruff above — invoked with
+# regime-trader/broker/alpaca_client.py passed explicitly alongside
+# `src tests` in CI/pre-commit; `extend-exclude` below does not apply to a
+# path passed explicitly.
 # --------------------------------------------------------------------------
 [tool.black]
 line-length = 100
@@ -119,14 +141,16 @@ extend-exclude = '''
 '''
 
 # --------------------------------------------------------------------------
-# MyPy (type checking). Strict on the foundation package; regime-trader/ and
-# backtest/ are excluded for the same reason as above — they predate this
-# milestone's tooling and haven't been brought under it yet.
+# MyPy (type checking). Strict on the foundation/market-data packages;
+# regime-trader/ and backtest/ are excluded for the same reason as above.
+# `regime-trader/broker/alpaca_client.py` is listed explicitly in `files`
+# below (see the Ruff section's note) since it's new Milestone 2 code, not
+# pre-existing untyped code the exclude is protecting.
 # --------------------------------------------------------------------------
 [tool.mypy]
 python_version = "3.9"
-mypy_path = "src"
-files = ["src", "tests"]
+mypy_path = "src:regime-trader"
+files = ["src", "tests", "regime-trader/broker/alpaca_client.py"]
 exclude = "^(regime-trader|backtest)/"
 strict = true
 warn_unused_configs = true
@@ -136,19 +160,43 @@ show_error_codes = true
 module = "yaml.*"
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = ["alpaca.*", "duckdb.*", "duckdb", "pyarrow.*", "pandas.*", "pandas"]
+ignore_missing_imports = true
+
 # --------------------------------------------------------------------------
 # Pytest
 # --------------------------------------------------------------------------
 [tool.pytest.ini_options]
 minversion = "8.0"
 testpaths = ["tests"]
-pythonpath = ["src"]
-addopts = "-ra --strict-markers --cov=common --cov-report=term-missing"
+# "regime-trader" is on the path so tests can import its modules (e.g.
+# `broker.alpaca_client`) the same way regime-trader/main.py itself does --
+# it is not a separately installed package. Contract tests for the
+# Milestone 2 adapter at regime-trader/broker/alpaca_client.py are the only
+# consumer of this today; see tests/regime_trader/.
+pythonpath = ["src", "regime-trader"]
+addopts = "-ra --strict-markers --cov=common --cov=market_data --cov-report=term-missing"
 asyncio_mode = "auto"
-filterwarnings = ["error"]
+filterwarnings = [
+    "error",
+    # Environment-specific, harmless: some local/CI interpreters link against
+    # LibreSSL instead of OpenSSL 1.1.1+; urllib3 v2 warns about it on import.
+    # Matched by message text, not `::urllib3.exceptions.NotOpenSSLWarning` --
+    # resolving that dotted path requires importing urllib3, which re-triggers
+    # the very warning being filtered before the filter is registered. Ignored
+    # here rather than weakening "error" globally -- see
+    # docs/engineering-handbook/Architecture/Known Gaps.md tooling-scope note.
+    "ignore:urllib3 v2 only supports OpenSSL.*",
+    # alpaca-py 0.43.5 internally imports `websockets.legacy`, deprecated by
+    # the `websockets` package itself -- an upstream alpaca-py compatibility
+    # gap, not something first-party code can fix. Revisit when alpaca-py
+    # migrates off the legacy websockets API.
+    "ignore:websockets.legacy is deprecated.*",
+]
 
 [tool.coverage.run]
-source = ["src/common"]
+source = ["src/common", "src/market_data"]
 branch = true
 
 [tool.coverage.report]
