@@ -1,0 +1,14 @@
+{
+  "tag": "v0.6-risk-management",
+  "date": "2026-07-13",
+  "python_version": "3.9.6",
+  "platform": "darwin",
+  "dataset": "single synthetic StrategyDecision + PortfolioState + AccountState triple, dispatched through RiskService.default()'s pipeline (BuyingPowerValidator, ExposureCapacitySizing, DrawdownCircuitBreaker), called 10,000 times",
+  "source": "tests/risk/test_performance.py's scenario, re-run standalone with resource.getrusage wrapped around the same RiskService.decide loop",
+  "decide_ms_per_call": 0.026,
+  "memory_mb": 148.54,
+  "known_gaps": [
+    "decide_ms_per_call measures pure in-memory validation/sizing/circuit-breaker dispatch -- no I/O, no order construction. Comparable in order of magnitude to strategy's v0.5 StrategyService.decide (~0.0096ms), slightly higher since this pipeline runs more stages (validators, sizing, a circuit breaker) rather than a single registry lookup.",
+    "memory_mb is whole-process peak RSS including numpy/scipy/hmmlearn/pandas import overhead pulled in transitively via features/hmm/strategy, not the incremental cost of risk evaluation alone -- see benchmarks/README.md's methodology note. Comparable to v0.4/v0.5's ~148-152mb for the same reason (same import graph), not evidence the Risk Manager itself has any meaningful memory footprint."
+  ]
+}

@@ -93,6 +93,11 @@ hmm = [
 # -- no direct third-party dependency, so installing `.[dev,features,hmm]`
 # already makes `strategy` importable. See
 # docs/engineering-handbook/Architecture/ADR/ADR-009-Strategy-Engine-Design.md.
+# `src/risk` (Milestone 6) similarly has no extras group of its own: it
+# depends only on `strategy.models` (for the `StrategyDecision` type) plus
+# `common` -- no direct third-party dependency, so installing
+# `.[dev,features,hmm]` already makes `risk` importable too. See
+# docs/engineering-handbook/Architecture/ADR/ADR-010-ExecutionDecision-Contract.md.
 # Runtime dependencies of the pre-existing regime-trader/ and backtest/ code
 # trees, declared here for installability and documentation purposes only —
 # regime-trader/'s own trading logic (core/, broker/ minus the Milestone 2
@@ -111,7 +116,7 @@ trading = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["common*", "market_data*", "features*", "hmm*", "strategy*"]
+include = ["common*", "market_data*", "features*", "hmm*", "strategy*", "risk*"]
 
 [tool.setuptools.package-data]
 common = ["py.typed"]
@@ -119,6 +124,7 @@ market_data = ["py.typed"]
 features = ["py.typed"]
 hmm = ["py.typed"]
 strategy = ["py.typed"]
+risk = ["py.typed"]
 
 # --------------------------------------------------------------------------
 # Ruff (lint + import sort). Scoped to the foundation/market-data packages
@@ -153,7 +159,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["common", "market_data", "features", "hmm", "strategy"]
+known-first-party = ["common", "market_data", "features", "hmm", "strategy", "risk"]
 
 [tool.ruff.format]
 # Formatting is Black's responsibility (see [tool.black] below); Ruff is
@@ -223,7 +229,7 @@ testpaths = ["tests"]
 # Milestone 2 adapter at regime-trader/broker/alpaca_client.py are the only
 # consumer of this today; see tests/regime_trader/.
 pythonpath = ["src", "regime-trader"]
-addopts = "-ra --strict-markers --cov=common --cov=market_data --cov=features --cov=hmm --cov=strategy --cov-report=term-missing"
+addopts = "-ra --strict-markers --cov=common --cov=market_data --cov=features --cov=hmm --cov=strategy --cov=risk --cov-report=term-missing"
 markers = [
     "performance: measures wall-clock performance against a milestone's documented targets (slower; see tests/features/test_performance.py and tests/hmm/test_performance.py)",
 ]
@@ -254,7 +260,7 @@ filterwarnings = [
 ]
 
 [tool.coverage.run]
-source = ["src/common", "src/market_data", "src/features", "src/hmm", "src/strategy"]
+source = ["src/common", "src/market_data", "src/features", "src/hmm", "src/strategy", "src/risk"]
 branch = true
 
 [tool.coverage.report]

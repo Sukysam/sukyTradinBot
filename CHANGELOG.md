@@ -13,6 +13,100 @@ Versions are tagged per milestone (`vN-<milestone-name>`), not per
 semantic-versioning release — this project doesn't ship releases in the
 traditional sense yet.
 
+## v0.6 - Risk Management (2026-07-13, tag `v0.6-risk-management`)
+
+### Added
+- `src/risk/` — a new, independently packaged platform: the first real
+  consumer of `StrategyDecision`, converting it (with a `PortfolioState`/
+  `AccountState` snapshot) into the canonical `ExecutionDecision`
+  (`timestamp`, `symbol`, `approved`, `approved_allocation`,
+  `decision_type`, `risk_adjustments`, `reasoning`, `strategy_reference`,
+  `metadata`). A packaged, hardened port of `regime-trader/core/
+  risk_manager.py`'s veto layer, not a from-scratch build.
+- `risk.models.DecisionType` — explicit `APPROVED`/`REDUCED`/`REJECTED`
+  classification, added during contract review, cross-checked against
+  `approved`/`approved_allocation`/`risk_adjustments` at construction.
+- `risk.validators` — small, composable, one-concern-each validators
+  ported from `core/risk_manager.py::check_exposure_limits`
+  (`GrossExposureValidator`, `LeverageValidator`,
+  `SingleTickerExposureValidator`, `SectorExposureValidator`) plus a net
+  new `BuyingPowerValidator` (`AccountState` has no legacy precedent).
+  `LiquidityValidator` ships as a deliberate `NotImplementedError`
+  placeholder (Master Charter invariant #4) — no volume/spread data
+  exists in any current input.
+- `risk.sizing.ExposureCapacitySizing` — a new, reduce-only sizing rule
+  with no legacy equivalent: fits a decision's allocation to remaining
+  gross-exposure/single-ticker/sector headroom instead of rejecting it
+  outright. `RiskService.default()` uses this, not the four exposure
+  validators above, as its default policy for those concerns — see the
+  redundancy bug below.
+- `risk.circuit_breakers.DrawdownCircuitBreaker` — ported from
+  `core/risk_manager.py::evaluate_circuit_breakers`: the same drawdown
+  tiers, most-severe-first evaluation, and disk-backed emergency
+  hard-stop lock file (never programmatically deleted, per Master
+  Charter invariant #3).
+- `risk.service.RiskService` — the package's single entry point:
+  `StrategyDecision -> validators -> sizing -> circuit breakers ->
+  ExecutionDecision`. `RiskService.default()` assembles a sensible
+  default pipeline; a caller wanting the legacy module's zero-tolerance
+  exposure policy constructs `RiskService` directly with the four
+  exposure validators instead.
+- `ADR-010-ExecutionDecision-Contract.md` and
+  `ADR-011-Risk-Manager-Design.md` — the `ExecutionDecision` contract
+  freeze (landed ahead of this tag, ungoverned by it, later amended
+  during review to add `decision_type`) and this milestone's
+  implementation decisions: the validator/sizing redundancy bug and its
+  fix, the validators→sizing→circuit-breakers pipeline order and why
+  it's outcome-equivalent to the legacy order, float-precision handling
+  for `decision_type`, minimal `AccountState`, and what's deliberately
+  deferred (per-trade dollar risk, correlation filtering, real
+  liquidity); binding spec: `Standards/ExecutionDecision Contract.md`.
+- 102 new tests: 87 in `tests/risk` (boundary tests for every threshold,
+  approval/rejection/reduction paths, multiple simultaneous violations,
+  circuit-breaker activation and most-severe-first ordering, the
+  emergency lock file's idempotency, determinism, validator/sizing
+  composition, an `InvalidSizingResultError` regression test) plus 12 in
+  `tests/contracts/test_executiondecision_contract.py`; `src/risk/`
+  reaches 100% line and branch coverage.
+- `benchmarks/v0.6-risk-management.json` — `RiskService.decide` latency
+  (~0.026ms/call over 10,000 trials), comfortably under the milestone's
+  <1ms target.
+
+### Changed
+- Nothing in `regime-trader/` changed — `core/risk_manager.py` remains
+  the live risk-veto path; `src/risk/` is not yet wired to any consumer.
+
+### Known limitations
+- A real design bug was found via testing, not caught in review before
+  implementation: the first cut wired all four exposure/leverage
+  validators into `RiskService.default()` alongside
+  `ExposureCapacitySizing`, both checking the identical ratio against
+  the identical threshold — meaning any decision sizing would have
+  reduced was instead always rejected outright first, making
+  `DecisionType.REDUCED` structurally unreachable in the default
+  pipeline. Fixed by excluding those four validators from
+  `RiskService.default()` (they remain fully implemented and tested for
+  a caller wanting the stricter, zero-tolerance policy instead). See
+  ADR-011 Decision 1.
+- Per-trade dollar-risk and correlation-filter checks from
+  `core/risk_manager.py` were not ported — both need data
+  (`entry_price`/`stop_price`, a rolling return history) that isn't part
+  of `StrategyDecision`, `PortfolioState`, or `AccountState` in this
+  milestone's pipeline. Both remain real, working checks in the still-live
+  `core/risk_manager.py`; nothing regresses in production. See ADR-011
+  Decision 5.
+- `LiquidityValidator` has no real implementation — it raises
+  `NotImplementedError` unconditionally and is never wired into
+  `RiskService.default()`. See ADR-011 Decision 6.
+- Only exercised against synthetic `StrategyDecision`/`PortfolioState`/
+  `AccountState` triples constructed directly in tests — not yet run
+  end-to-end against a real `StrategyService.decide` output.
+- `RiskService.default()`'s policy (graceful reduction over hard
+  rejection for gross/single-ticker/sector exposure) is more permissive
+  than `core/risk_manager.py`'s original binary-reject behavior — a
+  deliberate product decision, not an oversight; see ADR-011 Decision 1
+  for the full reasoning and how to opt into the stricter policy instead.
+
 ## v0.5 - Strategy Engine (2026-07-12, tag `v0.5-strategy-engine`)
 
 ### Added
