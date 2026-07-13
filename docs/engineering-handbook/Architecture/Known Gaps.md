@@ -76,11 +76,21 @@ before item 4 has a working, backtested implementation. Owner:
 [04_QUANT_RESEARCHER.md](../04_QUANT_RESEARCHER.md) (build),
 [07_SIGNAL_ORCHESTRATOR.md](../07_SIGNAL_ORCHESTRATOR.md) (integrate).
 
-### 6. Regime-aware equity backtesting harness
+### 6. Regime-aware equity backtesting harness (partially closed by Milestone 8)
 Today's `backtest/` only validates simple crypto SMA-crossover logic and
 cannot validate anything HMM- or regime-specific. A regime-aware harness
 needs real historical equity OHLCV (item 2) and a trained model per ticker
-(item 3) to replay the structural loop's decision path offline. Depends on
+(item 3) to replay the structural loop's decision path offline. The
+*mechanism* is now real: `src/backtest/` replays historical bars through
+the entire `src/` decision pipeline (Features → HMM → Strategy → Risk →
+Execution) deterministically, with a golden-dataset regression suite
+guarding against silent drift — see
+[ADR-014](ADR/ADR-014-BacktestResult-Contract.md) and
+[ADR-015](ADR/ADR-015-Backtesting-Engine-Design.md). What remains open:
+every run so far uses deterministic *synthetic* bars, never real
+historical equity OHLCV (still blocked on live Alpaca credentials, same
+as item 2's own live-account gap), and it replays `src/`'s own pipeline,
+not `regime-trader/`'s legacy structural loop specifically. Depends on
 items 2 and 3. Owner: [04_QUANT_RESEARCHER.md](../04_QUANT_RESEARCHER.md).
 
 ## How a gap is wired today

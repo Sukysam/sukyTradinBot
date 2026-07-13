@@ -113,6 +113,14 @@ execution = [
     "numpy>=1.26",
     "alpaca-py>=0.13",
 ]
+# `src/backtest` (Milestone 8) deliberately has no extras group of its
+# own: it depends on `execution`, `risk`, `strategy`, `hmm`, and
+# `features` at import time (the entire decision pipeline it replays),
+# each already installed by installing their own extras, plus `common`
+# -- no new direct third-party dependency of its own. Installing
+# `.[dev,features,hmm,execution]` already covers every transitive
+# dependency `src/backtest` actually imports. See
+# docs/engineering-handbook/Architecture/ADR/ADR-014-BacktestResult-Contract.md.
 # Runtime dependencies of the pre-existing regime-trader/ and backtest/ code
 # trees, declared here for installability and documentation purposes only —
 # regime-trader/'s own trading logic (core/, broker/ minus the Milestone 2
@@ -131,7 +139,7 @@ trading = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["common*", "market_data*", "features*", "hmm*", "strategy*", "risk*", "execution*"]
+include = ["common*", "market_data*", "features*", "hmm*", "strategy*", "risk*", "execution*", "backtest*"]
 
 [tool.setuptools.package-data]
 common = ["py.typed"]
@@ -141,6 +149,7 @@ hmm = ["py.typed"]
 strategy = ["py.typed"]
 risk = ["py.typed"]
 execution = ["py.typed"]
+backtest = ["py.typed"]
 
 # --------------------------------------------------------------------------
 # Ruff (lint + import sort). Scoped to the foundation/market-data packages
@@ -175,7 +184,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["common", "market_data", "features", "hmm", "strategy", "risk", "execution"]
+known-first-party = ["common", "market_data", "features", "hmm", "strategy", "risk", "execution", "backtest"]
 
 [tool.ruff.format]
 # Formatting is Black's responsibility (see [tool.black] below); Ruff is
@@ -245,7 +254,7 @@ testpaths = ["tests"]
 # Milestone 2 adapter at regime-trader/broker/alpaca_client.py are the only
 # consumer of this today; see tests/regime_trader/.
 pythonpath = ["src", "regime-trader"]
-addopts = "-ra --strict-markers --cov=common --cov=market_data --cov=features --cov=hmm --cov=strategy --cov=risk --cov=execution --cov-report=term-missing"
+addopts = "-ra --strict-markers --cov=common --cov=market_data --cov=features --cov=hmm --cov=strategy --cov=risk --cov=execution --cov=backtest --cov-report=term-missing"
 markers = [
     "performance: measures wall-clock performance against a milestone's documented targets (slower; see tests/features/test_performance.py and tests/hmm/test_performance.py)",
 ]
@@ -276,7 +285,7 @@ filterwarnings = [
 ]
 
 [tool.coverage.run]
-source = ["src/common", "src/market_data", "src/features", "src/hmm", "src/strategy", "src/risk", "src/execution"]
+source = ["src/common", "src/market_data", "src/features", "src/hmm", "src/strategy", "src/risk", "src/execution", "src/backtest"]
 branch = true
 
 [tool.coverage.report]
