@@ -21,6 +21,98 @@ and has no entry below. See [PROJECT_STATUS.md](PROJECT_STATUS.md)'s
 "Release Milestones" section for the full grouping and what each
 umbrella tag actually points at.
 
+## v0.8 - Backtesting & Validation (2026-07-13, tag `v0.8-backtesting`)
+
+### Added
+- `src/backtest/` -- a new, independently packaged platform: the first
+  real consumer of `OrderIntent` (and, transitively, every contract
+  before it), replaying historical bars through the *entire* decision
+  pipeline (Features -> HMM -> Strategy -> Risk -> Execution) and
+  producing the canonical `BacktestResult`. Never retrains models.
+  Distinct from the pre-existing, untooled `backtest/` crypto SMA
+  sandbox at the repository root.
+- Built in two explicit phases: Phase A (`backtest.replay.run_replay`)
+  proved deterministic replay to a trade log -- verified with two
+  identical runs producing byte-identical output -- *before* a single
+  metric was written. Phase B (`backtest.metrics`, `backtest.engine`)
+  layered performance metrics and reproducibility metadata on top.
+- `backtest.replay.run_replay` -- fills every `OrderIntent` at the
+  deciding bar's own open (never the same bar used to make the
+  decision), the causal boundary invariant #1 requires. Equity is
+  marked at each bar's close, after that step's fills. All symbols
+  replay in lockstep at each shared timestamp, so portfolio-level risk
+  checks (gross exposure, sector concentration) see every symbol's
+  state together; `InsufficientReplayHistoryError` if symbols' bars
+  aren't calendar-aligned.
+- `backtest.portfolio.PortfolioEngine` -- mutable, stateful cash/position/
+  equity tracking, deliberately kept separate from `replay.py` so it can
+  be reused for paper trading later. Weighted-average cost basis on
+  position top-ups; partial exits keep the remainder open at the
+  original average entry price and timestamp.
+- `backtest.metrics` -- grouped into `returns` (`cagr`, `sharpe_ratio`,
+  `sortino_ratio`, `calmar_ratio`), `risk` (`max_drawdown`), `exposure`
+  (`exposure`, `turnover`), and `trade_quality` (`win_rate`,
+  `profit_factor`, `average_holding_period`) rather than one large
+  module. Degenerate ratios (`calmar_ratio`, `profit_factor`) return
+  `float("inf")`, matching `risk.models.PortfolioState.
+  gross_exposure_pct`'s existing convention.
+- `backtest.engine.BacktestEngine` -- Phase B orchestration: calls
+  `run_replay`, computes metrics, assembles `ReplayRun` reproducibility
+  metadata (`run_id`, `dataset`, `pipeline_versions` collected from
+  every upstream package's own version, `git_commit`, `timestamp`), and
+  constructs the frozen `BacktestResult`. `git_commit` is a required,
+  explicit input -- `current_git_commit()` is a separate, opt-in helper,
+  never invoked implicitly.
+- `backtest.reporting.generate_report` -- a minimal, human-readable text
+  summary of a `BacktestResult`.
+- `ADR-014-BacktestResult-Contract.md` and
+  `ADR-015-Backtesting-Engine-Design.md` -- the `BacktestResult` contract
+  freeze (the first run-level, not single-event, contract in this
+  handbook; embeds a `ReplayRun` reproducibility record added during
+  review) and this milestone's implementation decisions; binding spec:
+  `Standards/BacktestResult Contract.md`.
+- A mandatory golden-dataset regression suite
+  (`tests/regression/golden_dataset.py`,
+  `tests/regression/baseline_results/synthetic_daily_2024.json`,
+  `tests/regression/test_golden_dataset.py`) comparing every CI run
+  against a checked-in deterministic synthetic scenario, with a
+  documented relative tolerance (not exact equality) given this
+  project's own CI matrix runs Python 3.9 and 3.11 against different
+  resolved `numpy`/`scipy` versions -- a real, previously observed
+  source of cross-version behavioral difference, not a hypothetical one.
+- 123 new tests: 101 in `tests/backtest` (models, portfolio, replay
+  determinism, metrics incl. degenerate-case boundaries, end-to-end
+  engine, config validation) plus 10 in `tests/contracts` and 12 in
+  `tests/regression`.
+- `benchmarks/v0.8-backtesting.json` -- a single-symbol, one-year
+  (252-bar) replay measured at ~2.8s.
+- `PROJECT_STATUS.md`'s new "Release Milestones" section and the
+  `v1.0-alpha` umbrella tag (grouping Milestones 1-7), declared in the
+  same window as this milestone but introducing no code of its own.
+
+### Changed
+- Nothing in `regime-trader/` or the pre-existing `backtest/` sandbox
+  changed -- `src/backtest/` is not yet wired to any live consumer.
+
+### Known limitations
+- Only exercised against deterministic *synthetic* bars (`SYNTH`), never
+  real historical equity data -- no live market-data credentials exist
+  in this environment (see Known Gaps item 2). Partially, not fully,
+  closes Known Gaps item 6: the replay *mechanism* is real, but a
+  regime-aware backtest against real historical equity OHLCV still
+  needs a live account.
+- Fill simulation assumes a full fill at the bar's open with zero
+  slippage (`NextBarOpenFillModel`, the only `FillModel` shipped) --
+  will overstate performance relative to a real venue's execution
+  quality. The `FillModel` Protocol exists specifically so a more
+  realistic model can be substituted later without touching `replay.py`.
+- `metrics.exposure.exposure` undercounts a position still open at the
+  very end of a replay (no `TradeRecord` exists for it yet, only closed
+  trades are counted) -- documented in the function's own docstring.
+- Multi-symbol replay requires every symbol's bars to share identical
+  timestamps (no calendar-alignment/forward-fill support yet) --
+  `InsufficientReplayHistoryError` otherwise.
+
 ## v0.7 - Execution Layer (2026-07-13, tag `v0.7-execution-layer`)
 
 ### Added

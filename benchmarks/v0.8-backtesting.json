@@ -1,0 +1,17 @@
+{
+  "tag": "v0.8-backtesting",
+  "date": "2026-07-13",
+  "python_version": "3.9.6",
+  "platform": "darwin",
+  "dataset": "312 synthetic daily bars (60 warm-up + 252 trading-day replay window, one symbol), replayed through the entire real decision pipeline (Features -> HMM -> Strategy -> Risk -> Execution) via BacktestEngine.run",
+  "source": "manual script mirroring tests/backtest/conftest.py's fixtures, with time.perf_counter and resource.getrusage wrapped around one BacktestEngine.run call",
+  "total_seconds": 2.8055,
+  "trades": 68,
+  "equity_points": 253,
+  "memory_mb": 155.69,
+  "known_gaps": [
+    "Single symbol only -- multi-symbol lockstep replay (this milestone's own design, see ADR-015) multiplies per-bar cost roughly linearly with symbol count; no multi-symbol benchmark exists yet.",
+    "Dominated by re-running FeaturePipeline.compute_series and the HMM's batch Forward Algorithm over a fresh window at every single bar -- the same 'no incremental filter, re-run over the given window every call' characteristic already documented and deliberately left unoptimized in ADR-007 (Decision 7) for hmm.service.RegimeService.infer, now visible end-to-end across a real replay rather than a single inference call.",
+    "memory_mb is whole-process peak RSS including numpy/scipy/hmmlearn/pandas/alpaca-py import overhead pulled in transitively via the entire pipeline, not the incremental cost of backtesting alone -- see benchmarks/README.md's methodology note. Comparable to v0.4 through v0.7's ~148-156mb for the same reason (same import graph), not evidence backtesting itself has a large footprint."
+  ]
+}
