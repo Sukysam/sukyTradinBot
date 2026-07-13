@@ -71,6 +71,7 @@ fixed — that's implementation, not contract). Does **not** freeze:
 | `symbol` | `str` | Never empty. Must equal `strategy_reference.symbol` (enforced at construction). |
 | `approved` | `bool` | Whether any position at all is permitted. `False` means reject outright — the strategy's intent does not get executed in any size this cycle. |
 | `approved_allocation` | `float` | The allocation actually cleared for execution, as the same fraction-of-allocatable-capital unit as `StrategyDecision.allocation`. **Bounded `[0.0, strategy_reference.allocation]` — risk can only hold size steady or reduce it, never increase what the strategy asked for.** This is the risk layer's equivalent of invariant #5 ("every strategy is long-only"): the veto layer is a size-reducing filter by construction, not a sizing-up one. When `approved` is `False`, `approved_allocation` must be `0.0`. |
+| `decision_type` | `DecisionType` (`str, Enum`: `APPROVED`, `REDUCED`, `REJECTED`) | Explicit tri-state classification, added during contract review so downstream code branches on `decision.decision_type is DecisionType.REDUCED` rather than reconstructing that classification from `approved`/`approved_allocation`/`risk_adjustments` combinations at every call site. Derivable from those three fields but stored and cross-checked against them at construction (see Invariants below) — the same role `CircuitBreakerAction` already plays in the legacy `core/risk_manager.py`: an explicit enum, not a raw multiplier/liquidate tuple callers must interpret themselves. |
 | `risk_adjustments` | `tuple[str, ...]` | Human-readable, one entry per limit or circuit breaker that shaped this decision — mirrors `VetoDecision.reasons`/`CircuitBreakerDecision.reasons` in the legacy module. **Empty tuple means a clean, full-size approval with nothing to note.** Non-empty whenever `approved` is `False` (enforced at construction — a rejection always cites at least one concrete reason, matching every real code path in `core/risk_manager.py::evaluate_trade`) **and** whenever `approved_allocation < strategy_reference.allocation` even while `approved` is `True` — this closes a real gap in the legacy `VetoDecision`, which silently drops the circuit-breaker reason when a trade is approved-but-size-cut (`CUT_SIZE_50`'s `size_multiplier=0.5` reaches the caller with no accompanying reason today). |
 | `reasoning` | `str` | Never empty. A single human-readable synthesis of the decision, present even for a clean full-size approval (e.g. `"Approved at full size; no limits binding."`) — the same "never submit an order with no reconstructable rationale" principle [00_MASTER_CHARTER.md](../00_MASTER_CHARTER.md) invariant #6 already requires of `StrategyDecision.reasoning`, applied one step downstream. Distinct from `risk_adjustments`: `reasoning` is always present and prose; `risk_adjustments` is structured and only present when something bound. |
 | `strategy_reference` | `strategy.models.StrategyDecision` | The exact `StrategyDecision` this `ExecutionDecision` evaluates, embedded in full rather than referenced by ID — gives every consumer full traceability (`strategy_id`, `regime_id`, the strategy's own requested `allocation`, `confidence`, `reasoning`, `expected_holding_period`) without a separate lookup. See ADR-010's Alternatives Considered for why a full embed was chosen over a lightweight reference. |
@@ -89,6 +90,10 @@ In addition to the per-field guarantees above, `__post_init__` enforces:
 4. `not approved` implies `len(risk_adjustments) > 0`.
 5. `approved_allocation < strategy_reference.allocation` implies `len(risk_adjustments) > 0` (covers the approved-but-reduced case).
 6. `reasoning` is non-empty after stripping whitespace.
+7. `decision_type` must agree with `approved`/`approved_allocation`/`risk_adjustments` — it is a stored classification, not just documentation, so a caller cannot construct a self-contradictory `ExecutionDecision`:
+   - `DecisionType.REJECTED` iff `not approved` (and therefore `approved_allocation == 0.0` and `risk_adjustments` non-empty, per invariants 3–4).
+   - `DecisionType.APPROVED` iff `approved and approved_allocation == strategy_reference.allocation and not risk_adjustments` — a clean, unadjusted approval.
+   - `DecisionType.REDUCED` iff `approved and approved_allocation < strategy_reference.allocation` (and therefore `risk_adjustments` non-empty, per invariant 5).
 
 ## Versioning policy
 
@@ -117,9 +122,9 @@ explicitly.
 
 - **v1** ([ADR-010](../Architecture/ADR/ADR-010-ExecutionDecision-Contract.md)):
   initial freeze — `timestamp`, `symbol`, `approved`, `approved_allocation`,
-  `risk_adjustments`, `reasoning`, `strategy_reference`, `metadata`. No
-  implementation exists yet; this is the contract Milestone 6 is built
-  against, not a retrofit onto existing code.
+  `decision_type`, `risk_adjustments`, `reasoning`, `strategy_reference`,
+  `metadata`. No implementation exists yet; this is the contract
+  Milestone 6 is built against, not a retrofit onto existing code.
 
 ## Enforcement
 

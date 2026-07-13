@@ -37,7 +37,7 @@ concern ADR-008 raised about `StrategyDecision` not creeping toward
 ## Decision
 
 `risk.models.ExecutionDecision` — `timestamp`, `symbol`, `approved`,
-`approved_allocation`, `risk_adjustments`, `reasoning`,
+`approved_allocation`, `decision_type`, `risk_adjustments`, `reasoning`,
 `strategy_reference`, `metadata` — is frozen as a binding contract,
 documented in full at
 [Standards/ExecutionDecision Contract.md](../../Standards/ExecutionDecision%20Contract.md),
@@ -80,6 +80,13 @@ the type level, not left to documentation or a call site's discipline:
    the `RegimeState`/`FeatureVector` it was built from and so cannot self-
    check consistency — because `strategy_reference` is a first-class field
    on `ExecutionDecision` itself.
+6. **`decision_type` (`APPROVED`/`REDUCED`/`REJECTED`) is a stored,
+   construction-time-validated classification**, not just a value a
+   consumer could derive by comparing `approved`, `approved_allocation`,
+   and `strategy_reference.allocation` itself. Added directly during
+   contract review, before merge — see Alternatives Considered for why
+   this complements rather than replaces the three fields it's checked
+   against.
 
 ## Consequences
 
@@ -100,6 +107,13 @@ the type level, not left to documentation or a call site's discipline:
   behavioral improvement over `core/risk_manager.py` — Milestone 6's
   implementation is a *hardened* port, not a byte-for-byte one, and this
   is the first concrete instance of that.
+- `decision_type` removes an entire class of latent bug where two
+  consumers independently reconstruct "was this reduced?" from
+  `approved`/`approved_allocation`/`strategy_reference.allocation` and
+  disagree on a floating-point edge case (e.g. one checks `approved_
+  allocation < strategy_reference.allocation`, another checks `bool(
+  risk_adjustments)`) — one construction-time-validated field means there
+  is exactly one place that comparison is made.
 - Trade-off, accepted: `ExecutionDecision` deliberately does not carry
   whole-book actions (liquidate-all, halt-all-new-trades) that
   `CircuitBreakerDecision.liquidate` and the `HALT_DAY`/`HALT_WEEK`/
@@ -157,3 +171,14 @@ the type level, not left to documentation or a call site's discipline:
   `RegimeState`)** — rejected per the same reasoning ADR-008 gave: the
   stricter before-implementation sequencing is the adopted process going
   forward, not a one-off exception limited to Milestone 5.
+- **Leave the approved/reduced/rejected classification implicit,
+  derivable only from `approved`, `approved_allocation`, and
+  `strategy_reference.allocation`** — this was the original design;
+  changed during review. Every consumer that wants to branch on the
+  three-way outcome (dashboards, audit logs, the future Adaptive Learning
+  milestone) would otherwise reconstruct the same comparison
+  independently. `decision_type` gives that classification exactly one
+  authoritative definition, validated at construction, the same role
+  `CircuitBreakerAction` already plays for the legacy module's own
+  multi-way classification rather than leaving it to a raw multiplier/
+  liquidate tuple.
