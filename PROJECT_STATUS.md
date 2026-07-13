@@ -20,6 +20,43 @@ producer/consumer boundary in that chain a frozen, versioned contract
 past it; see [docs/Compatibility.md](docs/Compatibility.md) for the exact
 versions.
 
+**Decision + Execution pipeline complete as of `v0.7-execution-layer`**:
+the full chain now runs end to end — Market Data → Features →
+`FeatureVector` → HMM → `RegimeState` → Strategy Engine →
+`StrategyDecision` → Risk Manager → `ExecutionDecision` → Execution
+Layer → `OrderIntent` → `BrokerAdapter` → Alpaca — every boundary a
+frozen, versioned contract (see [docs/Compatibility.md](docs/Compatibility.md)).
+Not yet wired to a live account and not yet validated against real
+historical data (Milestone 8's job); this note marks architectural
+completeness of the decision-and-execution path, not production
+readiness.
+
+## Release Milestones (umbrella releases)
+
+Grouping releases spanning multiple implementation milestones — a
+coarser-grained view for external communication than the per-milestone
+`vN-<name>` tags below, which remain the authoritative, individually
+tagged record and are never replaced or superseded by these. An umbrella
+tag (e.g. `v1.0-alpha`) points at the same commit as the last milestone
+tag it groups (`v0.7-execution-layer`); it exists purely as a label over
+already-tagged history.
+
+| Release | Includes | Status |
+|---|---|---|
+| `v1.0-alpha` | Milestones 1–7 (end-to-end paper-trading-ready architecture: Foundation through Execution Layer) | ✅ Tagged |
+| `v1.1-beta` | Milestone 8 (Backtesting & Validation) | ⏳ Planned |
+| `v1.2-beta` | Milestone 9 (Adaptive Learning / Memory Loop) | ⏳ Planned |
+| `v1.3-rc` | Milestone 10 (NLP News Engine) | ⏳ Planned |
+| `v1.4-rc` | Milestone 11 (Signal Orchestration) | ⏳ Planned |
+| `v2.0` | Milestone 12 (Production Monitoring & Deployment) | ⏳ Planned |
+
+"Alpha"/"beta"/"rc" here describe validation maturity, not code
+stability in the traditional semver sense: `v1.0-alpha` is architecturally
+complete but unvalidated against real historical data and unrun against
+a live account; each subsequent umbrella release adds a layer of
+validation or capability without the earlier layers being revisited
+just to earn the label.
+
 **Roadmap revision (2026-07-12)**: milestones 3–10 below were restructured
 from the original plan after Milestone 2's retro. Two changes: (1) a
 dedicated Feature Engineering Platform milestone now sits between Market

@@ -13,6 +13,14 @@ Versions are tagged per milestone (`vN-<milestone-name>`), not per
 semantic-versioning release — this project doesn't ship releases in the
 traditional sense yet.
 
+As of 2026-07-13, a second, coarser tag layer also exists —
+**umbrella releases** (`v1.0-alpha`, `v1.1-beta`, ...) grouping several
+milestone tags for external communication. `v1.0-alpha` points at the
+same commit as `v0.7-execution-layer`; it introduces no code of its own
+and has no entry below. See [PROJECT_STATUS.md](PROJECT_STATUS.md)'s
+"Release Milestones" section for the full grouping and what each
+umbrella tag actually points at.
+
 ## v0.7 - Execution Layer (2026-07-13, tag `v0.7-execution-layer`)
 
 ### Added
