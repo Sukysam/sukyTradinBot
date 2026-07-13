@@ -83,7 +83,7 @@ anyone should look to answer "is X actually built yet."
 | Backtesting Framework | **Implemented** (crypto SMA baseline); **planned** (regime-aware equity backtester) | [04 Quant Researcher](04_QUANT_RESEARCHER.md) | `backtest/` |
 | Risk Management & Circuit Breakers | **Implemented** | [08 Risk Manager](08_RISK_MANAGER.md) | `core/risk_manager.py` |
 | Risk Management Platform (`src/risk/`) | **Implemented** (validators, reduce-only sizing via `ExposureCapacitySizing`, `DrawdownCircuitBreaker`, `RiskService`); `ExecutionDecision` contract frozen at v1. A packaged, hardened port of `core/risk_manager.py` above, not a from-scratch build — deliberately more permissive by default than the legacy module (graceful reduction over hard rejection for exposure/concentration limits; see ADR-011 Decision 1) | [08 Risk Manager](08_RISK_MANAGER.md) | `src/risk/` — see [ADR-010](Architecture/ADR/ADR-010-ExecutionDecision-Contract.md) (contract freeze) and [ADR-011](Architecture/ADR/ADR-011-Risk-Manager-Design.md) (design); binding spec: [Standards/ExecutionDecision Contract.md](Standards/ExecutionDecision%20Contract.md). Not yet wired to any consumer. Per-trade dollar risk and correlation filtering deliberately not ported (need price/history data no current input provides — see ADR-011 Decision 5). |
-| Execution Layer Platform (`src/execution/`) | **Contract frozen** (`OrderIntent` v1); no implementation yet. Converts `ExecutionDecision` into a broker-agnostic order description — nothing under `src/execution/` may import an Alpaca SDK type directly; only a `BrokerAdapter` translates `OrderIntent` into a real API call | [03 Backend Engineer](03_BACKEND_ENGINEER.md) (broker connectivity) / [04 Quant Researcher](04_QUANT_RESEARCHER.md) (stop-loss sizing, since it depends on `src/features`'s volatility features) | Not yet built — see [ADR-012](Architecture/ADR/ADR-012-OrderIntent-Contract.md); binding spec: [Standards/OrderIntent Contract.md](Standards/OrderIntent%20Contract.md). Surfaces an open gap: neither `StrategyDecision` nor `ExecutionDecision` carries price data, so sourcing a live `reference_price` and a volatility-based `stop_loss` is unbuilt Milestone 7 implementation work. |
+| Execution Layer Platform (`src/execution/`) | **Implemented** (`router.py` target-vs-position reconciliation, `ATRStopPolicy`/`FixedPercentPolicy`, `OrderBuilder`, `ExecutionService`, `AlpacaBrokerAdapter`, retry-with-idempotency); `OrderIntent` contract frozen at v1. Converts `ExecutionDecision` into a broker-agnostic order description — nothing under `src/execution/` imports an Alpaca SDK type directly except `broker_adapter.py`, which translates `OrderIntent` into a real API call | [03 Backend Engineer](03_BACKEND_ENGINEER.md) (broker connectivity) / [04 Quant Researcher](04_QUANT_RESEARCHER.md) (stop-loss sizing, since it depends on `src/features`'s volatility features) | `src/execution/` — see [ADR-012](Architecture/ADR/ADR-012-OrderIntent-Contract.md) (contract freeze) and [ADR-013](Architecture/ADR/ADR-013-Execution-Layer-Design.md) (design); binding spec: [Standards/OrderIntent Contract.md](Standards/OrderIntent%20Contract.md). Not yet wired to any live consumer. `LIMIT` orders, live bid/ask, and a real tick-size table are deliberately deferred — see ADR-013's "Deliberately deferred" section. |
 | Production Deployment | **Implemented** (process lifecycle); **planned** (orchestration, model serving, drift monitoring) | [12 DevOps Engineer](12_DEVOPS_ENGINEER.md) | `main.py` lifecycle; see [Architecture/Production Deployment.md](Architecture/Production%20Deployment.md) |
 
 Full detail on each row: [Knowledge Base/Capability Architecture Map.md](Knowledge%20Base/Capability%20Architecture%20Map.md).
@@ -204,6 +204,18 @@ without updating every such reference.
     `risk.RiskService.decide` is the only place an `ExecutionDecision` is
     constructed — every consumer reads the finished decision, never
     reimplements the validation/sizing/circuit-breaker logic itself.
+13. **The `OrderIntent` contract is frozen — extend it, never silently
+    change it.** Required fields, bounds (`quantity >= 1`, `stop_loss`
+    mandatory for a `BUY` and forbidden for a `SELL`, `execution_reference.
+    approved` must be `True`), and versioning rules are binding as of
+    [ADR-012](Architecture/ADR/ADR-012-OrderIntent-Contract.md); full
+    detail in
+    [Standards/OrderIntent Contract.md](Standards/OrderIntent%20Contract.md).
+    Every field type is first-party — nothing under `src/execution/`
+    outside `broker_adapter.py` may import an Alpaca SDK type, per
+    [ADR-013](Architecture/ADR/ADR-013-Execution-Layer-Design.md).
+    `execution.ExecutionService.decide` is the only place an `OrderIntent`
+    is constructed.
 
 ## 5. Repository Structure
 
@@ -402,7 +414,7 @@ it, never relax it.
 1. **Correctness**: the change does what it claims, verified by tests at
    the appropriate tier (see Testing Standards) — not just "it ran once
    without an exception."
-2. **No invariant violations**: none of the twelve invariants in Section 4
+2. **No invariant violations**: none of the thirteen invariants in Section 4
    are violated.
 3. **Reviewed**: passed the Review Process below, with every blocking or
    needs-discussion finding resolved, not just acknowledged.

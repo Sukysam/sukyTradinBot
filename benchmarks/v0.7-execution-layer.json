@@ -1,0 +1,15 @@
+{
+  "tag": "v0.7-execution-layer",
+  "date": "2026-07-13",
+  "python_version": "3.9.6",
+  "platform": "darwin",
+  "dataset": "single synthetic ExecutionDecision + PortfolioState pair, routed through ExecutionService.decide with fake in-memory MarketSnapshotProvider/FeatureSnapshotProvider (no real bar/feature computation, no network), called 10,000 times",
+  "source": "manual script mirroring tests/execution/test_execution_service.py's fixtures, with resource.getrusage wrapped around the same ExecutionService.decide loop",
+  "decide_ms_per_call": 0.017,
+  "memory_mb": 148.18,
+  "known_gaps": [
+    "decide_ms_per_call measures pure in-memory routing + stop-loss arithmetic with fake providers -- it excludes the real BarSnapshotProvider/FeaturePipelineSnapshotProvider cost (a HistoricalDataProvider.get_bars call plus a FeaturePipeline.compute_series run), which in production dominates total latency. Not comparable to a real end-to-end order-build time.",
+    "memory_mb is whole-process peak RSS including numpy/scipy/hmmlearn/pandas/alpaca-py import overhead pulled in transitively via features/hmm/execution, not the incremental cost of order building alone -- see benchmarks/README.md's methodology note. Comparable to v0.4/v0.5/v0.6's ~148-151mb for the same reason (same import graph), not evidence execution itself has any meaningful footprint.",
+    "No benchmark yet exists for BarSnapshotProvider/FeaturePipelineSnapshotProvider against a real HistoricalDataProvider -- add one once Milestone 7 is wired to a real market_data source rather than a fake in a test."
+  ]
+}

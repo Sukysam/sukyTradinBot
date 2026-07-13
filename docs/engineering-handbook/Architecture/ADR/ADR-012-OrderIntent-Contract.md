@@ -46,6 +46,24 @@ with `OrderIntent` deliberately not named `BrokerOrder` — extends
 reverse) from market data ingestion to order submission: nothing under
 `src/` should import an Alpaca SDK type directly.
 
+**Principle** (added during review, before implementation began — not a
+change to the frozen shape above, a statement of why it's shaped this
+way): *execution contracts describe trading intent, not market
+observations.* `OrderIntent` is durable — its fields describe a decision
+that was made and should remain reconstructable and auditable
+indefinitely. A live quote, a spread, an ATR reading at build time are
+transient — true at the moment `OrderIntent` was built, not a fact worth
+freezing into a versioned contract every future consumer must forever
+agree on the shape of. This is why `reference_price` is captured as a
+plain `float` on `OrderIntent` (the price that was used, a historical
+fact worth keeping) while the *mechanism* that produced it — a live
+quote, order book depth, an ATR calculation — stays entirely internal to
+`src/execution` (see ADR-013's `ExecutionContext`/`FeatureSnapshot`,
+deliberately never frozen). The same distinction already implicitly
+shaped `StrategyDecision` and `ExecutionDecision`: both work in
+allocation *fractions*, precisely so neither has to freeze an opinion
+about what a live price is.
+
 ## Decision
 
 `execution.models.OrderIntent` — `timestamp`, `symbol`, `side`,
