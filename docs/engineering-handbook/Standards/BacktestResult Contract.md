@@ -82,8 +82,9 @@ freeze:
 | `turnover` | `float` | `>= 0.0`. Sum of traded notional (both entries and exits) divided by average equity over the run — no fixed upper bound (a high-turnover strategy can legitimately exceed `1.0`). |
 | `trade_log` | `tuple[TradeRecord, ...]` | Every closed trade during the run, ascending by `exit_timestamp`. May be empty (a run with no completed trades). |
 | `equity_curve` | `tuple[EquityPoint, ...]` | Non-empty. Strictly ascending by `timestamp`. `equity_curve[0].equity == initial_equity`. |
+| `replay_run` | `ReplayRun` | Reproducibility metadata for this specific run — see below. Added during contract review so a regression six months from now can be traced back to exactly which code, contracts, dataset, and versions produced it, not just re-run and hoped to match. |
 | `generated_at` | `datetime` | UTC. When this `BacktestResult` was constructed — not `end_date`. |
-| `metadata` | `Mapping[str, Any]` | Free-form. **No guaranteed keys yet** — same reasoning as every other contract frozen before its implementation existed. The natural home for run configuration (which model version, which strategy config, random seed) once a real implementation defines what it needs there. |
+| `metadata` | `Mapping[str, Any]` | Free-form. **No guaranteed keys yet** — same reasoning as every other contract frozen before its implementation existed. The natural home for run configuration (which strategy config, random seed) not already covered by `replay_run`, once a real implementation defines what it needs there. |
 
 ## Required fields — `TradeRecord`
 
@@ -114,7 +115,23 @@ One point on the equity curve.
 | `timestamp` | `datetime` | UTC. |
 | `equity` | `float` | `>= 0.0`. |
 
-All three types must be immutable (`frozen=True`) dataclasses, matching
+## Required fields — `ReplayRun`
+
+Reproducibility metadata identifying exactly what produced a
+`BacktestResult` — added during contract review, before implementation
+began, specifically so a regression discovered later can be traced back
+to its cause rather than merely re-detected.
+
+| Field | Type | Guarantee |
+|---|---|---|
+| `run_id` | `str` | Non-empty. A caller-assigned identifier for this specific run — how it's generated (a UUID, a deterministic hash of the run's inputs) is implementation detail, not fixed here. |
+| `dataset` | `str` | Non-empty. Which historical dataset was replayed (e.g. `"SPY-daily-2024"`) — plain-language, matching the precedent `benchmarks/*.json`'s own `dataset` field already established, not a path or a hash. |
+| `pipeline_versions` | `Mapping[str, str]` | Every contract-shape version this run actually depended on (e.g. `{"features": "2", "hmm_model": "spy_v3", "risk": "1", "execution": "1"}`) — **no guaranteed keys**, since which packages a given run touches is itself implementation detail this freeze doesn't fix. |
+| `git_commit` | `str` | Non-empty. The commit hash the code was at when this run was executed. |
+| `timestamp` | `datetime` | UTC. When the replay was invoked — distinct from `BacktestResult.generated_at` (when the finished result object was constructed); the two are typically close but not required to be identical, since a long replay can take real wall-clock time between the two. |
+
+All four types (`BacktestResult`, `TradeRecord`, `EquityPoint`,
+`ReplayRun`) must be immutable (`frozen=True`) dataclasses, matching
 every other contract in this handbook.
 
 ## Versioning policy
@@ -143,9 +160,10 @@ regression testing meaningful.
   `initial_equity`, `final_equity`, `cagr`, `sharpe_ratio`,
   `sortino_ratio`, `calmar_ratio`, `max_drawdown`, `win_rate`,
   `profit_factor`, `average_holding_period`, `exposure`, `turnover`,
-  `trade_log`, `equity_curve`, `generated_at`, `metadata`), `TradeRecord`,
-  `EquityPoint`. No implementation exists yet; this is the contract
-  Milestone 8 is built against, not a retrofit onto existing code.
+  `trade_log`, `equity_curve`, `replay_run`, `generated_at`, `metadata`),
+  `TradeRecord`, `EquityPoint`, `ReplayRun`. No implementation exists
+  yet; this is the contract Milestone 8 is built against, not a retrofit
+  onto existing code.
 
 ## Enforcement
 

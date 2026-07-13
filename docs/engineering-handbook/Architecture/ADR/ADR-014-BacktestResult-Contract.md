@@ -29,14 +29,15 @@ freeze borrows a handful of that sandbox's field *names* (`win_rate`,
 
 ## Decision
 
-`backtest.models.BacktestResult` — 18 fields covering run identification
+`backtest.models.BacktestResult` — 19 fields covering run identification
 (`start_date`, `end_date`, `symbols`, `initial_equity`, `final_equity`),
 ten performance metrics (`cagr`, `sharpe_ratio`, `sortino_ratio`,
 `calmar_ratio`, `max_drawdown`, `win_rate`, `profit_factor`,
 `average_holding_period`, `exposure`, `turnover`), two embedded
 record-list types (`trade_log: tuple[TradeRecord, ...]`,
-`equity_curve: tuple[EquityPoint, ...]`), plus `generated_at` and
-`metadata` — is frozen as a binding contract, documented in full at
+`equity_curve: tuple[EquityPoint, ...]`), a `replay_run: ReplayRun`
+reproducibility record, plus `generated_at` and `metadata` — is frozen
+as a binding contract, documented in full at
 [Standards/BacktestResult Contract.md](../../Standards/BacktestResult%20Contract.md),
 *before* `src/backtest/` is scaffolded.
 
@@ -68,6 +69,14 @@ record-list types (`trade_log: tuple[TradeRecord, ...]`,
    rather than a new enum — `backtest` depends on `execution` at import
    time for this one type, the same way `hmm` depends on `features` for
    `FeatureVector`.
+5. **`ReplayRun` (`run_id`, `dataset`, `pipeline_versions`, `git_commit`,
+   `timestamp`) is embedded as `BacktestResult.replay_run`**, added
+   during contract review before implementation began. A `BacktestResult`
+   is meaningless as a regression baseline without knowing exactly what
+   produced it — which code (`git_commit`), which contract versions
+   (`pipeline_versions`), and which dataset. Without this field, a
+   regression discovered six months from now could only be re-detected,
+   not traced to its cause.
 
 ## Consequences
 
@@ -79,11 +88,15 @@ record-list types (`trade_log: tuple[TradeRecord, ...]`,
   *.json`, per the technical lead's explicit recommendation) have a
   stable, versioned shape to serialize against from day one — they don't
   need to be redesigned if the backtest engine's internals change later.
-- `BacktestResult` has more required fields (18, plus two embedded
+- `BacktestResult` has more required fields (19, plus three embedded
   record types) than any prior contract in this handbook. This is not
   scope creep: a run-level summary genuinely carries more information
   than a single decision does, and each field is independently
   justified in the Standards doc.
+- `replay_run` makes every `BacktestResult` self-describing: given only
+  the object (or its serialized form in a regression baseline file),
+  the exact commit, dataset, and contract versions that produced it are
+  recoverable without external record-keeping.
 - Trade-off, accepted: because no implementation exists yet, this freeze
   is more speculative than a freeze written against real code — same
   acknowledgment every prior "freeze before implementation" ADR in this
@@ -120,3 +133,10 @@ record-list types (`trade_log: tuple[TradeRecord, ...]`,
   mathematically a well-defined limit, and this codebase already has a
   precedent (`PortfolioState.gross_exposure_pct`) for using `inf`
   instead.
+- **Put run-identifying metadata (`run_id`, `git_commit`, dataset) in
+  `BacktestResult.metadata` instead of a dedicated `ReplayRun` field** —
+  rejected: this information isn't optional or implementation-defined
+  the way `metadata`'s other future contents are — every `BacktestResult`
+  needs it to be useful as a regression baseline, so it belongs among the
+  required fields, not buried in a free-form dict with no guaranteed
+  keys.
