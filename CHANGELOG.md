@@ -13,6 +13,114 @@ Versions are tagged per milestone (`vN-<milestone-name>`), not per
 semantic-versioning release — this project doesn't ship releases in the
 traditional sense yet.
 
+## v0.7 - Execution Layer (2026-07-13, tag `v0.7-execution-layer`)
+
+### Added
+- `src/execution/` — a new, independently packaged platform: the first
+  real consumer of `ExecutionDecision`, converting it (with current
+  `PortfolioState`) into the canonical `OrderIntent` (`timestamp`,
+  `symbol`, `side`, `quantity`, `order_type`, `limit_price`,
+  `time_in_force`, `reference_price`, `stop_loss`, `take_profit`,
+  `idempotency_key`, `reasoning`, `execution_reference`, `metadata`) --
+  broker-agnostic: every field type is first-party, never an Alpaca SDK
+  type.
+- `execution.router.route` -- reconciles `ExecutionDecision.
+  approved_allocation` (a target fraction of equity) against the
+  existing position for that symbol to decide buy/sell/hold and a
+  whole-share quantity. Neither `StrategyDecision` nor `ExecutionDecision`
+  expresses an order delta directly; this is genuinely new logic, not a
+  port. A `SELL` quantity is capped at an approximate current share
+  count (`market_value / reference_price`), documented as an
+  approximation rather than an exact guarantee.
+- `execution.models.ExecutionContext`/`FeatureSnapshot` -- internal,
+  deliberately *unfrozen* value objects carrying a transient market
+  observation (price) and the minimal feature slice
+  (`atr_14`/`realized_volatility_20`) a stop-loss policy needs. Per
+  ADR-012's amended principle ("execution contracts describe trading
+  intent, not market observations"), neither is a frozen contract and
+  neither is embedded in `OrderIntent`.
+- `execution.interfaces.{MarketSnapshotProvider,FeatureSnapshotProvider,
+  StopLossPolicy,BrokerAdapter}` -- four pluggable `Protocol`s.
+  `BrokerAdapter` is kept structurally separate from `ExecutionService`:
+  building an `OrderIntent` and submitting one are different operations
+  with different failure modes.
+- `execution.stop_loss.{ATRStopPolicy,FixedPercentPolicy}` -- pluggable
+  stop-loss sizing. `ATRStopPolicy` (the default) sets a stop
+  `atr_multiplier` average-true-ranges below the reference price;
+  `FixedPercentPolicy` is a fallback ignoring volatility entirely. No
+  concrete "volatility tier" formula exists anywhere in this codebase to
+  port, so both are new designs grounded in `src/features`'s existing
+  ATR feature, not a port of unfound legacy logic.
+- `execution.providers.{BarSnapshotProvider,FeaturePipelineSnapshotProvider}`
+  -- concrete provider implementations wrapping `market_data.interfaces.
+  HistoricalDataProvider` and `features.FeaturePipeline`. Never import a
+  specific provider (`AlpacaHistoricalProvider`) or `alpaca-py` directly.
+  `BarSnapshotProvider` is honest about what a `Bar`-only data source
+  can't supply: `bid`/`ask`/`spread` are always `None`.
+- `execution.order_builder.OrderBuilder` / `execution.execution_service.
+  ExecutionService` -- orchestration. `ExecutionService.default(
+  historical_provider)` wires a sensible default pipeline (bar-close
+  snapshots, `FeaturePipeline`-computed features, `ATRStopPolicy`).
+- `execution.broker_adapter.AlpacaBrokerAdapter` -- the *only* module
+  under `src/execution/` that imports `alpaca-py`. Translates an
+  `OrderIntent` into a real OTO/BRACKET `MarketOrderRequest`, matching
+  `regime-trader/broker/order_executor.py`'s existing construction logic
+  (ported, not reimplemented from scratch) but consuming `OrderIntent`
+  instead of raw `entry_price`/`stop_price`/`notional_value` parameters.
+  Whole-share quantity and the mandatory-stop-for-a-BUY rule are already
+  guaranteed by `OrderIntent`'s own construction-time invariants by the
+  time an intent reaches this adapter -- no re-validation needed.
+- `execution.retry.submit_with_retry` -- bridges `BrokerAdapter.
+  submit_order`'s result-based failure (it never raises, matching
+  `OrderExecutor`'s existing pattern) into `common.retry.call_with_retry`'s
+  exception-based mechanism. Every retry resubmits the same `OrderIntent.
+  idempotency_key` as `client_order_id` -- a real improvement over the
+  legacy `order_executor.py`, whose per-call `uuid.uuid4()` could not
+  have supported genuine idempotent retries.
+- `ADR-012-OrderIntent-Contract.md` and
+  `ADR-013-Execution-Layer-Design.md` -- the `OrderIntent` contract
+  freeze (including the "execution contracts describe trading intent,
+  not market observations" principle, added during review before
+  implementation began) and this milestone's implementation decisions;
+  binding spec: `Standards/OrderIntent Contract.md`.
+- `execution` extras group in `pyproject.toml` (pandas, numpy,
+  `alpaca-py`) -- the first milestone-5-onward package with a real
+  third-party dependency of its own, scoped to the one module
+  (`broker_adapter.py`) that actually needs it.
+- 85 new tests: 74 in `tests/execution` (routing buy/sell/hold/no-action,
+  stop-loss policies, order building incl. a non-protective-stop guard,
+  concrete providers against a fake `HistoricalDataProvider`, broker
+  translation against a mocked `TradingClient`, retry/idempotency,
+  end-to-end `ExecutionService` wiring) plus 11 in `tests/contracts`.
+- `benchmarks/v0.7-execution-layer.json` -- `ExecutionService.decide`
+  latency (~0.017ms/call over 10,000 trials against fake in-memory
+  providers; excludes real bar-fetch/feature-computation cost).
+
+### Changed
+- Nothing in `regime-trader/` changed -- `broker/order_executor.py`
+  remains untouched; `src/execution/` is not yet wired to any live
+  consumer.
+
+### Known limitations
+- `OrderType.LIMIT` is modeled in the frozen contract but has no broker
+  translation yet -- `AlpacaBrokerAdapter.submit_order` raises
+  `NotImplementedError` for one. No current requirement or legacy
+  precedent calls for a limit order.
+- No live bid/ask: `BarSnapshotProvider` always reports `bid=ask=spread=
+  None` -- a `Bar` carries no quote data. A `MarketSnapshotProvider`
+  backed by `market_data.interfaces.StreamingDataProvider`'s live quotes
+  is future work.
+- `DEFAULT_TICK_SIZE = 0.01` is a flat placeholder for all US equities,
+  not a real venue-specific tick table.
+- `router.py`'s `SELL` quantity cap
+  (`current_position_value / reference_price`) is an approximation --
+  `Position.market_value` is a dollar mark-to-market figure, not a
+  stored share count, the same documented caveat `core/risk_manager.py`'s
+  `ProposedTrade.dollar_risk` already carries.
+- Only exercised against synthetic `ExecutionDecision`/`PortfolioState`
+  pairs and fake providers -- not yet run end-to-end against real
+  historical data or a real (even paper) Alpaca account.
+
 ## v0.6 - Risk Management (2026-07-13, tag `v0.6-risk-management`)
 
 ### Added
