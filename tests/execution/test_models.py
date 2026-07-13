@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 import pytest
 
 from execution.models import OrderIntent, OrderSide, OrderType, TimeInForce
+from risk.models import ExecutionDecision
 from tests.execution.conftest import (
     make_execution_context,
     make_execution_decision,
@@ -20,6 +21,7 @@ UTC = timezone.utc
 
 def _intent(**overrides: object) -> OrderIntent:
     execution_decision = overrides.pop("execution_reference", None) or make_execution_decision()
+    assert isinstance(execution_decision, ExecutionDecision)
     defaults: dict[str, object] = {
         "timestamp": execution_decision.timestamp,
         "symbol": execution_decision.symbol,

@@ -86,7 +86,9 @@ class TestSubmitOrderSuccess:
 class TestSubmitOrderFailure:
     def test_api_error_is_caught_and_returned_as_result(self) -> None:
         client = MagicMock()
-        client.submit_order.side_effect = APIError("insufficient buying power")
+        client.submit_order.side_effect = APIError(  # type: ignore[no-untyped-call]
+            "insufficient buying power"
+        )
         adapter = AlpacaBrokerAdapter(client)
         intent = _intent(make_execution_decision())
 
@@ -132,6 +134,6 @@ class TestCancelOrder:
 
     def test_api_error_returns_false(self) -> None:
         client = MagicMock()
-        client.cancel_order_by_id.side_effect = APIError("not found")
+        client.cancel_order_by_id.side_effect = APIError("not found")  # type: ignore[no-untyped-call]
         adapter = AlpacaBrokerAdapter(client)
         assert adapter.cancel_order("missing-order") is False
