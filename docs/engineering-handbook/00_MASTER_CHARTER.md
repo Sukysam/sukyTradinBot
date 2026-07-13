@@ -79,10 +79,10 @@ anyone should look to answer "is X actually built yet."
 | Alpaca Broker Integration | **Implemented** — order execution and historical data client both built | [03 Backend Engineer](03_BACKEND_ENGINEER.md) | `broker/order_executor.py`; `broker/alpaca_client.py` (adapter over `src/market_data`) |
 | Feature Engineering Platform | **Implemented** (39-feature causal registry, `FeaturePipeline`, `FeatureVector`, manifest); `FeatureVector` contract frozen at v2 (with `provenance`); consumed by `src/hmm/`, not yet by anything in `regime-trader/` | [04 Quant Researcher](04_QUANT_RESEARCHER.md) | `src/features/` — see [ADR-003](Architecture/ADR/ADR-003-Feature-Engineering.md), [ADR-004](Architecture/ADR/ADR-004-FeatureVector-Contract-Freeze.md) (contract freeze), and [ADR-005](Architecture/ADR/ADR-005-FeatureVector-Provenance.md) (provenance, v1→v2); binding spec: [Standards/FeatureVector Contract.md](Standards/FeatureVector%20Contract.md). `regime-trader/data/feature_engineering.py` remains the live path until a milestone re-points the live HMM at this pipeline. |
 | HMM & Regime Detection Platform | **Implemented** (deterministic Gaussian HMM: normalization, training, BIC/AIC model selection, causal forward-algorithm inference, filesystem persistence, `RegimeService`); `RegimeState` contract frozen at v1; not yet wired to any consumer or to `main.py.ModelStore` | [04 Quant Researcher](04_QUANT_RESEARCHER.md) | `src/hmm/` — see [ADR-006](Architecture/ADR/ADR-006-RegimeState-Contract.md) (contract freeze) and [ADR-007](Architecture/ADR/ADR-007-HMM-Design.md) (design); binding spec: [Standards/RegimeState Contract.md](Standards/RegimeState%20Contract.md). `core/hmm_engine.py` remains the live path — see the "HMM Regime Detection (live)" row above. |
-| Strategy Engine (`src/strategy/`) | **Implemented** (registry-dispatched regime→allocation: `StrategyRegistry`, `StrategyService`, four reference strategies — growth/bear/mean-reversion/defensive). Scoped narrower than "Adaptive Strategy Allocation" below (regime-tier only, no sentiment/bandit-confidence inputs, no SHAP, no portfolio construction/optimization, no capital/liquidity/leverage checks, no order placement) — whether Milestone 5 fully closes that capability or is an earlier phase toward it remains a call for whoever builds the next phase, not decided here | [04 Quant Researcher](04_QUANT_RESEARCHER.md) / [07 Signal Orchestrator](07_SIGNAL_ORCHESTRATOR.md) | `src/strategy/` — see [ADR-008](Architecture/ADR/ADR-008-StrategyDecision-Contract.md) (contract freeze) and [ADR-009](Architecture/ADR/ADR-009-Strategy-Engine-Design.md) (design); binding spec: [Standards/StrategyDecision Contract.md](Standards/StrategyDecision%20Contract.md). Not yet wired to any consumer (risk, execution, adaptive learning, signal orchestration). |
+| Strategy Engine (`src/strategy/`) | **Implemented** (registry-dispatched regime→allocation: `StrategyRegistry`, `StrategyService`, four reference strategies — growth/bear/mean-reversion/defensive). Scoped narrower than "Adaptive Strategy Allocation" below (regime-tier only, no sentiment/bandit-confidence inputs, no SHAP, no portfolio construction/optimization, no capital/liquidity/leverage checks, no order placement) — whether Milestone 5 fully closes that capability or is an earlier phase toward it remains a call for whoever builds the next phase, not decided here | [04 Quant Researcher](04_QUANT_RESEARCHER.md) / [07 Signal Orchestrator](07_SIGNAL_ORCHESTRATOR.md) | `src/strategy/` — see [ADR-008](Architecture/ADR/ADR-008-StrategyDecision-Contract.md) (contract freeze) and [ADR-009](Architecture/ADR/ADR-009-Strategy-Engine-Design.md) (design); binding spec: [Standards/StrategyDecision Contract.md](Standards/StrategyDecision%20Contract.md). Consumed by `src/risk/` as of Milestone 6; not yet wired to execution, adaptive learning, or signal orchestration. |
 | Backtesting Framework | **Implemented** (crypto SMA baseline); **planned** (regime-aware equity backtester) | [04 Quant Researcher](04_QUANT_RESEARCHER.md) | `backtest/` |
 | Risk Management & Circuit Breakers | **Implemented** | [08 Risk Manager](08_RISK_MANAGER.md) | `core/risk_manager.py` |
-| Risk Management Platform (`src/risk/`) | **Contract frozen** (`ExecutionDecision` v1); no implementation yet. A packaged, hardened port of `core/risk_manager.py` above, not a from-scratch build — see [PROJECT_STATUS.md](../../PROJECT_STATUS.md) Milestone 6 | [08 Risk Manager](08_RISK_MANAGER.md) | Not yet built — see [ADR-010](Architecture/ADR/ADR-010-ExecutionDecision-Contract.md); binding spec: [Standards/ExecutionDecision Contract.md](Standards/ExecutionDecision%20Contract.md). |
+| Risk Management Platform (`src/risk/`) | **Implemented** (validators, reduce-only sizing via `ExposureCapacitySizing`, `DrawdownCircuitBreaker`, `RiskService`); `ExecutionDecision` contract frozen at v1. A packaged, hardened port of `core/risk_manager.py` above, not a from-scratch build — deliberately more permissive by default than the legacy module (graceful reduction over hard rejection for exposure/concentration limits; see ADR-011 Decision 1) | [08 Risk Manager](08_RISK_MANAGER.md) | `src/risk/` — see [ADR-010](Architecture/ADR/ADR-010-ExecutionDecision-Contract.md) (contract freeze) and [ADR-011](Architecture/ADR/ADR-011-Risk-Manager-Design.md) (design); binding spec: [Standards/ExecutionDecision Contract.md](Standards/ExecutionDecision%20Contract.md). Not yet wired to any consumer. Per-trade dollar risk and correlation filtering deliberately not ported (need price/history data no current input provides — see ADR-011 Decision 5). |
 | Production Deployment | **Implemented** (process lifecycle); **planned** (orchestration, model serving, drift monitoring) | [12 DevOps Engineer](12_DEVOPS_ENGINEER.md) | `main.py` lifecycle; see [Architecture/Production Deployment.md](Architecture/Production%20Deployment.md) |
 
 Full detail on each row: [Knowledge Base/Capability Architecture Map.md](Knowledge%20Base/Capability%20Architecture%20Map.md).
@@ -191,6 +191,18 @@ without updating every such reference.
     `strategy.Strategy.allocate` is the only place a `StrategyDecision` is
     constructed — every consumer reads the finished decision, never
     reimplements the allocation formula itself.
+12. **The `ExecutionDecision` contract is frozen — extend it, never
+    silently change it.** Required fields, bounds (`approved_allocation`
+    in `[0.0, strategy_reference.allocation]`, `reasoning` non-empty,
+    `risk_adjustments` non-empty whenever the decision is rejected or
+    reduced, `decision_type` consistent with the other fields), and
+    versioning rules are binding as of
+    [ADR-010](Architecture/ADR/ADR-010-ExecutionDecision-Contract.md);
+    full detail in
+    [Standards/ExecutionDecision Contract.md](Standards/ExecutionDecision%20Contract.md).
+    `risk.RiskService.decide` is the only place an `ExecutionDecision` is
+    constructed — every consumer reads the finished decision, never
+    reimplements the validation/sizing/circuit-breaker logic itself.
 
 ## 5. Repository Structure
 
@@ -227,15 +239,26 @@ sukyTradinBot/
 │                                   StrategyDecision output; consumes only FeatureVector +
 │                                   RegimeState, no broker/risk/memory/NLP integration; see
 │                                   Architecture/ADR/ADR-009-Strategy-Engine-Design.md
+├── src/risk/                       risk manager (Milestone 6): converts a StrategyDecision
+│                                   (plus PortfolioState/AccountState) into the canonical
+│                                   ExecutionDecision — validators (small, composable, one
+│                                   concern each), reduce-only sizing (ExposureCapacitySizing),
+│                                   a portfolio-wide DrawdownCircuitBreaker, all behind
+│                                   RiskService; a packaged, hardened port of
+│                                   core/risk_manager.py, not a from-scratch build; consumes
+│                                   only strategy.models.StrategyDecision, no broker/memory/NLP
+│                                   integration; see Architecture/ADR/ADR-011-Risk-Manager-Design.md
 ├── tests/common/                  tests for src/common
 ├── tests/market_data/             tests for src/market_data
 ├── tests/features/                tests for src/features
 ├── tests/hmm/                     tests for src/hmm
 ├── tests/strategy/                tests for src/strategy
+├── tests/risk/                     tests for src/risk
 ├── tests/contracts/                cross-package regression suite verifying FeatureVector/
-│                                   RegimeState/StrategyDecision's frozen shape, version
-│                                   metadata, serialization round-trips, and backward
-│                                   compatibility — distinct from each package's own unit tests
+│                                   RegimeState/StrategyDecision/ExecutionDecision's frozen
+│                                   shape, version metadata, serialization round-trips, and
+│                                   backward compatibility — distinct from each package's own
+│                                   unit tests
 ├── tests/regime_trader/           contract tests for the regime-trader/ <-> src/market_data
 │                                   adapter (see below) — the one exception to "tests/
 │                                   mirrors src/", since regime-trader/ isn't a package
@@ -378,7 +401,7 @@ it, never relax it.
 1. **Correctness**: the change does what it claims, verified by tests at
    the appropriate tier (see Testing Standards) — not just "it ran once
    without an exception."
-2. **No invariant violations**: none of the eight invariants in Section 4
+2. **No invariant violations**: none of the twelve invariants in Section 4
    are violated.
 3. **Reviewed**: passed the Review Process below, with every blocking or
    needs-discussion finding resolved, not just acknowledged.
