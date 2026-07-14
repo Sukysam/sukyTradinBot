@@ -282,8 +282,60 @@ class DeploymentInfo:
         )
 
 
+@dataclass(frozen=True)
+class DiagnosticReport:
+    """A single point-in-time snapshot combining everything Milestone
+    12's other work packages already track -- build identity, runtime
+    identity, current health, and (if known) which deployment is
+    running -- into one object worth reading at the start of any
+    production investigation. `ops.diagnostics.build_diagnostic_report`
+    is the only place that constructs one.
+
+    Deliberately holds no field that already lives elsewhere:
+    `version`/`git_commit` are read via `runtime_context.platform_info`,
+    `environment` via `runtime_context.environment` -- adding second
+    copies of any of them here would reintroduce exactly the
+    duplicated-source-of-truth risk `RuntimeContext` and `DeploymentInfo`
+    were each designed to avoid relative to `PlatformInfo`. `deployment_info`
+    is `None` when no deployment tracking is available for this
+    process -- a `DiagnosticReport` must still be constructible without
+    it, since not every environment this runs in necessarily has
+    deployment tracking wired up yet."""
+
+    runtime_context: RuntimeContext
+    health: PlatformHealth
+    deployment_info: DeploymentInfo | None
+    generated_at: datetime
+
+    def __post_init__(self) -> None:
+        require_utc(self.generated_at, "generated_at")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "runtime_context": self.runtime_context.to_dict(),
+            "health": self.health.to_dict(),
+            "deployment_info": (
+                self.deployment_info.to_dict() if self.deployment_info is not None else None
+            ),
+            "generated_at": self.generated_at.isoformat(),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> DiagnosticReport:
+        deployment_data = data.get("deployment_info")
+        return cls(
+            runtime_context=RuntimeContext.from_dict(data["runtime_context"]),
+            health=PlatformHealth.from_dict(data["health"]),
+            deployment_info=(
+                DeploymentInfo.from_dict(deployment_data) if deployment_data is not None else None
+            ),
+            generated_at=datetime.fromisoformat(data["generated_at"]),
+        )
+
+
 __all__ = [
     "DeploymentInfo",
+    "DiagnosticReport",
     "HealthCheckResult",
     "HealthStatus",
     "PlatformHealth",

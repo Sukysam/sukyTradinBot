@@ -34,6 +34,15 @@ else in this package reads, never recomputes independently:
   last-known-good prior deployment from history. No CI/CD platform
   integration -- no deployment target has been chosen yet; see
   ADR-025-Deployment-And-Release-Automation-Design.md.
+- WP5 (Operations & Diagnostics): `ops.models.DiagnosticReport`
+  composes an already-built `RuntimeContext`, `PlatformHealth`, and
+  optional `DeploymentInfo` into one snapshot for production
+  investigation; `ops.diagnostics.build_diagnostic_report` is pure
+  composition (no new validation logic); `ops.reporting.
+  generate_diagnostic_report` renders it as text. Runbooks/incident-
+  response/disaster-recovery/backup-restore/on-call/production-
+  readiness procedures live in `docs/operations/`, outside `src/`, per
+  direct instruction; see ADR-026-Operations-And-Diagnostics-Design.md.
 """
 
 from __future__ import annotations
@@ -67,6 +76,7 @@ from ops.deployment import (
     validate_deployment,
     verify_release_manifest,
 )
+from ops.diagnostics import build_diagnostic_report
 from ops.exceptions import (
     DeploymentValidationError,
     MissingSecretError,
@@ -87,6 +97,7 @@ from ops.metrics import (
 )
 from ops.models import (
     DeploymentInfo,
+    DiagnosticReport,
     HealthCheckResult,
     HealthStatus,
     PlatformHealth,
@@ -94,14 +105,14 @@ from ops.models import (
     RuntimeContext,
     classify_status,
 )
-from ops.reporting import generate_health_report
+from ops.reporting import generate_diagnostic_report, generate_health_report
 from ops.rollback import require_rollback_target, select_rollback_target
 from ops.secrets import EnvSecretSource, SecretSource, SecretValue, resolve_secret
 from ops.startup import build_runtime_context
 from ops.tracing import Span, Tracer
 from ops.validation import ValidationResult, require_valid_runtime, validate_runtime
 
-__version__ = "0.4.0"
+__version__ = "0.5.0"
 
 __all__ = [
     "Alert",
@@ -112,6 +123,7 @@ __all__ = [
     "Counter",
     "DeploymentInfo",
     "DeploymentValidationError",
+    "DiagnosticReport",
     "EnvSecretSource",
     "Gauge",
     "HealthCheck",
@@ -133,6 +145,7 @@ __all__ = [
     "UnhealthyPlatformError",
     "ValidationResult",
     "__version__",
+    "build_diagnostic_report",
     "build_runtime_context",
     "classify_status",
     "compute_checksum",
@@ -143,6 +156,7 @@ __all__ = [
     "execution_adapter_check",
     "export_prometheus_text",
     "feature_registry_check",
+    "generate_diagnostic_report",
     "generate_health_report",
     "hmm_model_check",
     "log_alert",

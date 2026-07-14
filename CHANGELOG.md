@@ -21,6 +21,66 @@ and has no entry below. See [PROJECT_STATUS.md](PROJECT_STATUS.md)'s
 "Release Milestones" section for the full grouping and what each
 umbrella tag actually points at.
 
+## Unreleased - Milestone 12 WP5: Operations & Runbooks (2026-07-14, no tag)
+
+Fifth and final work package of Milestone 12. Per direct instruction:
+most of WP5 moves *out* of `src/` into documentation and operational
+assets, with one small runtime addition where it genuinely supports
+operational workflows.
+
+### Added
+- `ops.models.DiagnosticReport{runtime_context, health, deployment_info,
+  generated_at}` -- composes an already-built `RuntimeContext`,
+  `PlatformHealth`, and optional `DeploymentInfo` into one snapshot for
+  production investigation. Holds no field that already lives on one
+  of its components (`version`/`git_commit`/`environment` all read
+  through `runtime_context`).
+- `ops.diagnostics.build_diagnostic_report` -- pure composition, no new
+  validation logic, mirrors `ops.startup.build_runtime_context`'s
+  orchestration-only role.
+- `ops.reporting.generate_diagnostic_report` -- text rendering,
+  alongside the existing `generate_health_report`.
+- `docs/operations/release-runbook.md` -- operationalizes WP1-WP4's
+  mechanisms into a step-by-step release and rollback procedure.
+- `docs/operations/incident-response.md` -- new `src/ops`-detectable
+  incident classes (startup validation failure, platform unhealthy/
+  degraded, deployment drift, checksum mismatch, no rollback target),
+  complementing the pre-existing `SOPs/Incident Response Runbook.md`.
+- `docs/operations/disaster-recovery.md` -- host-loss/state-corruption
+  recovery procedure, prioritized by what must survive.
+- `docs/operations/backup-restore.md` -- what must be backed up (HMM
+  model artifacts, experience/news stores, `EMERGENCY_HALT.lock`,
+  deployment history), what must never be backed up as plaintext
+  (secrets), and restore verification steps.
+- `docs/operations/on-call-guide.md` -- what pages on-call, the
+  diagnostic-report-first response pattern, and the escalation path.
+- `docs/operations/production-checklist.md` -- pre-go-live gate
+  synthesizing Known Gaps closure, runtime/deployment validation,
+  Master Charter invariants, backup verification, and shadow-mode
+  component status into one sign-off checklist.
+- `ADR-026-Operations-And-Diagnostics-Design.md` -- design and
+  implementation recorded together, same cadence as ADR-022 through
+  ADR-025.
+- 15 new tests in `tests/ops/` (195 total). 100% line/branch coverage on
+  `src/ops/`.
+
+### Changed
+- `ops.__version__` bumped `0.4.0` -> `0.5.0`.
+- Nothing in any existing package changed -- `src/ops/` remains pure
+  stdlib, zero transitive third-party dependencies, across all five
+  Milestone 12 work packages.
+
+### Known limitations
+- Every `docs/operations/` procedure is manual -- no automation exists
+  to run any runbook without a human invoking the underlying `ops`
+  function, consistent with ADR-025's "no deployment target chosen
+  yet" scope.
+- This closes Milestone 12's five planned work packages
+  (WP1 Health & Readiness, WP2 Observability, WP3 Configuration &
+  Secrets, WP4 Deployment & Release Automation, WP5 Operations &
+  Runbooks). A final umbrella release (`v2.0.0` or similar) remains a
+  separate, explicit decision, not assumed by this entry.
+
 ## Unreleased - Milestone 12 WP4: Deployment & Release Automation (2026-07-14, no tag)
 
 Fourth of Milestone 12's five work packages. Per direct instruction:
