@@ -21,6 +21,82 @@ and has no entry below. See [PROJECT_STATUS.md](PROJECT_STATUS.md)'s
 "Release Milestones" section for the full grouping and what each
 umbrella tag actually points at.
 
+## v0.9 - Adaptive Learning / Memory Loop (2026-07-14, tag `v0.9-memory-loop`)
+
+### Added
+- `src/memory/` -- a new, independently packaged platform: a **shadow-mode-
+  only** adaptive learning loop that records what it would have
+  recommended for every real `StrategyDecision`, without ever influencing
+  `strategy`, `risk`, or `execution`. The first package in this handbook
+  with zero transitive third-party dependencies.
+- Built in three explicit phases, each independently verified before the
+  next began. Phase A (`memory.store`): `InMemoryExperienceStore` and
+  `JsonlExperienceStore` -- an immutable, append-only Experience Store, no
+  learning yet. `JsonlExperienceStore` persists one JSON object per line
+  with sorted keys for byte-for-byte deterministic output, and follows
+  the load-or-init pattern (a missing file is a legitimate first-run
+  state). Phase B (`memory.bandit`, `memory.service`):
+  `ThompsonSamplingPolicy`/`BetaArm` -- a contextual multi-armed bandit
+  (Thompson Sampling over Beta posteriors, `(strategy_id, regime_id)`
+  context) reusing the exact update rule already validated by the legacy
+  `regime-trader/core/learning_engine.py`, plus `MemoryService`, the
+  sanctioned entry point wiring store and policy together. Phase C
+  (`memory.evaluation`): `evaluate`/`generate_evaluation_report` --
+  agreement rate, recommendation drift, simulated P&L (linear rescaling
+  assumption), cumulative regret, and mean confidence, comparing shadow
+  recommendations against realized outcomes. Read-only: no production
+  influence, no state mutation.
+- `recommended_allocation = production_allocation * sampled_weight` --
+  the bandit only ever scales production's own allocation down (or close
+  to unchanged for a strong posterior), never proposes a larger
+  allocation than production chose, extending invariant #5 (long-only)
+  into shadow territory. `confidence = sample_size / (sample_size +
+  confidence_smoothing)`, a simpler, more explainable proxy than a
+  variance-derived confidence interval.
+- `ADR-016-LearningDecision-Contract.md` and `ADR-017-Memory-Loop-Design.md`
+  -- the `ExperienceRecord`/`LearningDecision` contract freeze (the first
+  contract pair in this handbook adapted from, not ported from, a
+  pre-existing legacy implementation) and this milestone's three-phase
+  implementation decisions; binding spec: `Standards/LearningDecision
+  Contract.md`.
+- 114 new tests: 105 in `tests/memory` (models, store, bandit, service,
+  evaluation, config, performance) plus 9 in `tests/contracts`. 100% line/
+  branch coverage on `src/memory/`.
+- `benchmarks/v0.9-memory-loop.json` -- a new benchmark category
+  (experience insert, bandit update, recommendation generation), all
+  sub-millisecond and pure in-memory.
+
+### Changed
+- Nothing in `strategy`, `risk`, or `execution` changed -- `src/memory/`
+  gains no new dependency on any of them, and none of them gain a new
+  dependency on `src/memory/`. This is the property Milestone 9 exists to
+  prove out safely: shadow mode is architectural, not just documented.
+
+### Known limitations
+- SHAP-based `rationale` and a LightGBM learning policy are both
+  explicitly deferred -- the bandit's posterior summary and a simple,
+  non-empty human-readable rationale satisfy this milestone's contract;
+  see ADR-016/ADR-017's Alternatives Considered for why.
+- The learning context is `(strategy_id, regime_id)` only -- no per-
+  symbol, RSI-bucket, or other feature-derived dimension, narrower than
+  the legacy design's own context. Widening it is a deliberate, reviewed,
+  separately-ADR'd decision, not a natural next increment.
+- `evaluation.evaluate`'s `simulated_pnl` uses a linear rescaling
+  assumption (realized P&L scaled by the ratio of recommended to
+  production allocation) -- not a real counterfactual simulation;
+  slippage, liquidity, and risk-limit interactions at a different
+  position size are all ignored.
+- `JsonlExperienceStore` assumes a single writer per path, with no file
+  locking -- matches the legacy `data/trade_context_db.json`'s own
+  assumption, not yet revisited for a genuine multi-writer scenario.
+- Not yet wired to a real backtest replay or live trading loop as an
+  experience producer -- every test in this milestone constructs
+  synthetic `ExperienceRecord`s directly.
+- Letting a `LearningDecision` actually influence a real
+  `StrategyDecision`/`ExecutionDecision`/`OrderIntent` remains a separate,
+  later, explicitly-authorized decision -- not something this milestone's
+  existence should be read as already permitting.
+
 ## v0.8 - Backtesting & Validation (2026-07-13, tag `v0.8-backtesting`)
 
 ### Added

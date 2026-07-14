@@ -1,0 +1,18 @@
+{
+  "tag": "v0.9-memory-loop",
+  "date": "2026-07-14",
+  "python_version": "3.9.6",
+  "platform": "darwin",
+  "dataset": "synthetic ExperienceRecord instances, one context (growth_v1, regime 0), inserted/updated/recommended 10,000 times each via InMemoryExperienceStore.append, ThompsonSamplingPolicy.update, and ThompsonSamplingPolicy.recommend (the last measured after 50 warm-up updates so the arm's posterior isn't a bare cold-start prior)",
+  "source": "tests/memory/test_performance.py's three scenarios, re-run standalone with resource.getrusage wrapped around the same loops",
+  "insert_ms_per_call": 0.0006,
+  "update_ms_per_call": 0.0011,
+  "recommend_ms_per_call": 0.0116,
+  "memory_mb": 34.65,
+  "known_gaps": [
+    "insert_ms_per_call measures InMemoryExperienceStore.append only -- JsonlExperienceStore.append's file I/O is deliberately not benchmarked, since its latency is dominated by filesystem/OS behavior, not memory's own logic.",
+    "recommend_ms_per_call is noticeably higher than insert/update because it draws from Python's stdlib random.Random.betavariate, which is more expensive than the arithmetic increments update/append perform -- still comfortably sub-millisecond.",
+    "memory_mb (34.65) is far lower than every prior milestone's ~148-156mb, not an inconsistency: memory has no transitive third-party dependency (no numpy/pandas/scipy/hmmlearn/alpaca-py in its own import graph), unlike every package benchmarked before it -- see docs/engineering-handbook/Architecture/ADR/ADR-016-LearningDecision-Contract.md's pyproject.toml note. This number reflects that, not a change in methodology.",
+    "Single context only -- all three operations measured against one (strategy_id, regime_id) pair; a workload spanning many distinct contexts would allocate more BetaArm instances but each individual operation's cost is context-count-independent (dict lookup, not a scan)."
+  ]
+}
