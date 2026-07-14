@@ -21,6 +21,61 @@ and has no entry below. See [PROJECT_STATUS.md](PROJECT_STATUS.md)'s
 "Release Milestones" section for the full grouping and what each
 umbrella tag actually points at.
 
+## Unreleased - Milestone 12 WP3: Configuration & Secrets (2026-07-14, no tag)
+
+Third of Milestone 12's five work packages, extending `src/ops/` per
+direct product-owner instruction rather than creating a new top-level
+package. Scoped around one immutable runtime identity object,
+`RuntimeContext` -- "the operational equivalent of your domain
+contracts."
+
+### Added
+- `ops.models.RuntimeContext{platform_info, environment, startup_time}`
+  -- deliberately narrower than first proposed: no embedded
+  `validated_config` field (a constructed `RuntimeContext` *is* the
+  proof that startup validation passed -- `ops.startup.
+  build_runtime_context` is the only place that constructs one, and
+  will not return one unless it does), and no duplicate `git_commit`
+  (already on `platform_info`). Never carries secret material.
+- `ops.secrets` -- `SecretSource` Protocol, `EnvSecretSource` (reads
+  `os.environ`, the same source `common.config.Settings` and
+  `market_data.auth.AlpacaCredentials` already use), `SecretValue`
+  (redacted `__repr__`/`__str__`, `reveal()` the one explicit way to
+  read the actual value), and `resolve_secret`. No secrets-manager
+  client dependency -- no backend has been chosen yet.
+- `ops.validation` -- `ValidationResult`, `validate_runtime` (collects
+  every failure in one pass, not just the first), and
+  `require_valid_runtime` -- mirrors `ops.health`'s report/gate split.
+- `ops.startup.build_runtime_context` -- the one startup sequence:
+  validate environment/secrets, optionally evaluate health checks (only
+  when a non-empty `checks` sequence is given -- no real subsystem
+  probes are wired to this function in this work package), then build a
+  `RuntimeContext`. Accepts `environment` as a plain `str` rather than
+  importing `common.config.Settings` directly, so `ops` stays free of
+  the `pydantic`/`pydantic-settings` dependency `Settings` requires.
+- `ADR-024-Configuration-And-Secrets-Design.md` -- design and
+  implementation recorded together, same cadence as ADR-022/ADR-023.
+- 36 new tests in `tests/ops/` (147 total). 100% line/branch coverage on
+  `src/ops/`.
+
+### Changed
+- `ops.__version__` bumped `0.2.0` -> `0.3.0`.
+- Corrected a test-count error in this file's own WP2 entry below: "167
+  total" should have read "111 total" (55 from WP1 + 56 from WP2) --
+  caught while computing this entry's own count.
+- Nothing in any existing package changed -- `src/ops/` remains pure
+  stdlib, zero transitive third-party dependencies.
+
+### Known limitations
+- No real deployment entrypoint calls `build_runtime_context` yet, and
+  no real `SecretSource` beyond `EnvSecretSource` exists -- wiring a
+  real secrets-manager backend, if one is ever adopted, is a later,
+  explicit decision, not assumed here.
+- `RuntimeContext` is not yet read by any of WP1's health checks,
+  WP2's metrics/tracing/logging/alerts, or anything else -- it is a new
+  model, not yet wired to the modules built in prior work packages.
+- WP4 (Deployment) and WP5 (Operations) are not yet started.
+
 ## Unreleased - Milestone 12 WP2: Observability (2026-07-14, no tag)
 
 Second of Milestone 12's five work packages. Per direct product-owner
@@ -55,7 +110,7 @@ metrics rather than being part of the runtime").
   `evaluate_alerts(health, rules)`.
 - `ADR-023-Observability-Design.md` -- design and implementation
   recorded together, same cadence as ADR-022.
-- 56 new tests in `tests/ops/` (167 total). 100% line/branch coverage on
+- 56 new tests in `tests/ops/` (111 total). 100% line/branch coverage on
   `src/ops/`.
 
 ### Changed

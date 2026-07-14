@@ -1,6 +1,6 @@
-"""Tests for `ops.models`: `HealthCheckResult`, `PlatformHealth`, and
-`PlatformInfo`'s construction-time invariants, serialization, and
-`classify_status`."""
+"""Tests for `ops.models`: `HealthCheckResult`, `PlatformHealth`,
+`PlatformInfo`, and `RuntimeContext`'s construction-time invariants,
+serialization, and `classify_status`."""
 
 from __future__ import annotations
 
@@ -13,6 +13,7 @@ from ops.models import (
     HealthStatus,
     PlatformHealth,
     PlatformInfo,
+    RuntimeContext,
     classify_status,
 )
 
@@ -40,6 +41,16 @@ def _info(**overrides: object) -> PlatformInfo:
     }
     defaults.update(overrides)
     return PlatformInfo(**defaults)  # type: ignore[arg-type]
+
+
+def _context(**overrides: object) -> RuntimeContext:
+    defaults: dict[str, object] = {
+        "platform_info": _info(),
+        "environment": "production",
+        "startup_time": T0,
+    }
+    defaults.update(overrides)
+    return RuntimeContext(**defaults)  # type: ignore[arg-type]
 
 
 def _health(**overrides: object) -> PlatformHealth:
@@ -178,3 +189,26 @@ class TestPlatformInfo:
         info = _info()
         with pytest.raises(AttributeError):
             info.version = "0.13.0"  # type: ignore[misc]
+
+
+class TestRuntimeContext:
+    def test_valid_context_constructs(self) -> None:
+        context = _context()
+        assert context.environment == "production"
+
+    def test_rejects_naive_startup_time(self) -> None:
+        with pytest.raises(ValueError, match="timezone-aware"):
+            _context(startup_time=datetime(2024, 1, 1))
+
+    def test_rejects_empty_environment(self) -> None:
+        with pytest.raises(ValueError, match="environment"):
+            _context(environment="")
+
+    def test_round_trips_through_dict(self) -> None:
+        context = _context()
+        assert RuntimeContext.from_dict(context.to_dict()) == context
+
+    def test_is_frozen(self) -> None:
+        context = _context()
+        with pytest.raises(AttributeError):
+            context.environment = "test"  # type: ignore[misc]

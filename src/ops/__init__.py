@@ -2,10 +2,10 @@
 
 Not a domain-decision milestone like 1-11, so there is no frozen
 contract-freeze PR preceding each work package's implementation -- see
-docs/engineering-handbook/Architecture/ADR/ADR-022-Health-And-Readiness-Design.md
-and ADR-023-Observability-Design.md for why. `PlatformHealth` is the
-one stable operational model everything else in this package reads,
-never recomputes independently:
+docs/engineering-handbook/Architecture/ADR/ADR-022-Health-And-Readiness-Design.md,
+ADR-023-Observability-Design.md, and ADR-024-Configuration-And-Secrets-Design.md
+for why. `PlatformHealth` is the one stable operational model everything
+else in this package reads, never recomputes independently:
 
 - WP1 (Health & Readiness): `ops.checks` builds one `HealthCheck` per
   subsystem this platform depends on (configuration, market data, model
@@ -18,6 +18,14 @@ never recomputes independently:
   `PlatformHealth`; `ops.tracing` gives dependency-injected span
   timing; `ops.logging` emits structured operational log events;
   `ops.alerts` evaluates alert rules against a `PlatformHealth`.
+- WP3 (Configuration & Secrets): `ops.secrets` gives injectable secret
+  resolution (`SecretSource`/`EnvSecretSource`/`SecretValue`);
+  `ops.validation` is the fail-fast gate for environment/secret
+  configuration, mirroring `ops.health`'s report/gate split;
+  `ops.startup.build_runtime_context` composes configuration
+  validation, secret resolution, and (optionally) health checks into
+  one immutable `RuntimeContext` -- this platform's operational runtime
+  identity.
 """
 
 from __future__ import annotations
@@ -44,7 +52,12 @@ from ops.checks import (
     risk_service_check,
     strategy_registry_check,
 )
-from ops.exceptions import OpsError, UnhealthyPlatformError
+from ops.exceptions import (
+    MissingSecretError,
+    OpsError,
+    RuntimeValidationError,
+    UnhealthyPlatformError,
+)
 from ops.health import evaluate_health, require_healthy
 from ops.interfaces import HealthCheck
 from ops.logging import log_alert, log_health_status
@@ -60,12 +73,16 @@ from ops.models import (
     HealthStatus,
     PlatformHealth,
     PlatformInfo,
+    RuntimeContext,
     classify_status,
 )
 from ops.reporting import generate_health_report
+from ops.secrets import EnvSecretSource, SecretSource, SecretValue, resolve_secret
+from ops.startup import build_runtime_context
 from ops.tracing import Span, Tracer
+from ops.validation import ValidationResult, require_valid_runtime, validate_runtime
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "Alert",
@@ -74,18 +91,26 @@ __all__ = [
     "CallableAlertRule",
     "CallableHealthCheck",
     "Counter",
+    "EnvSecretSource",
     "Gauge",
     "HealthCheck",
     "HealthCheckResult",
     "HealthStatus",
     "MetricsRegistry",
+    "MissingSecretError",
     "OpsError",
     "PlatformHealth",
     "PlatformInfo",
+    "RuntimeContext",
+    "RuntimeValidationError",
+    "SecretSource",
+    "SecretValue",
     "Span",
     "Tracer",
     "UnhealthyPlatformError",
+    "ValidationResult",
     "__version__",
+    "build_runtime_context",
     "classify_status",
     "configuration_check",
     "degraded_platform_rule",
@@ -104,7 +129,10 @@ __all__ = [
     "nlp_pipeline_check",
     "record_health_metrics",
     "require_healthy",
+    "require_valid_runtime",
+    "resolve_secret",
     "risk_service_check",
     "strategy_registry_check",
     "unhealthy_platform_rule",
+    "validate_runtime",
 ]

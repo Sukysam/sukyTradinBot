@@ -178,10 +178,61 @@ class PlatformInfo:
         )
 
 
+@dataclass(frozen=True)
+class RuntimeContext:
+    """The one immutable object every operational surface -- health
+    checks, metrics, logging, alerts, deployment tooling -- can read to
+    answer "what build, in what environment, has been running since
+    when." `ops.startup.build_runtime_context` is the only place that
+    constructs one, and it will not return one unless configuration
+    loaded and every required secret resolved -- constructing a
+    `RuntimeContext` *is* the proof that startup validation succeeded,
+    rather than that proof being a separate field to go stale.
+
+    Deliberately excludes two things a first reading of "runtime
+    context" might expect: it carries no secret material (proving
+    secrets resolved is `ops.validation`'s job; storing the resolved
+    values on an object that gets passed around and possibly logged is
+    a needless leak surface), and it does not duplicate `git_commit`
+    from `platform_info` (`RuntimeContext.platform_info.git_commit` is
+    the one place that lives).
+
+    Distinct from `PlatformHealth`: this describes *identity*,
+    established once at startup and immutable for the process's life;
+    `PlatformHealth` describes *current state*, re-evaluated on demand
+    and free to change between any two calls.
+    """
+
+    platform_info: PlatformInfo
+    environment: str
+    startup_time: datetime
+
+    def __post_init__(self) -> None:
+        require_utc(self.startup_time, "startup_time")
+        if not self.environment:
+            raise ValueError("environment must not be empty")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "platform_info": self.platform_info.to_dict(),
+            "environment": self.environment,
+            "startup_time": self.startup_time.isoformat(),
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> RuntimeContext:
+        return cls(
+            platform_info=PlatformInfo.from_dict(data["platform_info"]),
+            environment=data["environment"],
+            startup_time=datetime.fromisoformat(data["startup_time"]),
+        )
+
+
 __all__ = [
     "HealthCheckResult",
     "HealthStatus",
     "PlatformHealth",
     "PlatformInfo",
+    "RuntimeContext",
     "classify_status",
 ]
