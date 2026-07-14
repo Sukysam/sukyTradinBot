@@ -44,8 +44,8 @@ already-tagged history.
 | Release | Includes | Status |
 |---|---|---|
 | `v1.0-alpha` | Milestones 1–7 (end-to-end paper-trading-ready architecture: Foundation through Execution Layer) | ✅ Tagged |
-| `v1.1-beta` | Milestone 8 (Backtesting & Validation) | ⏳ Planned |
-| `v1.2-beta` | Milestone 9 (Adaptive Learning / Memory Loop) | ⏳ Planned |
+| `v1.1-beta` | Milestone 8 (Backtesting & Validation) | 🚧 Milestone tagged (`v0.8-backtesting`); umbrella tag not yet cut |
+| `v1.2-beta` | Milestone 9 (Adaptive Learning / Memory Loop) | 🚧 Milestone tagged (`v0.9-memory-loop`); umbrella tag not yet cut |
 | `v1.3-rc` | Milestone 10 (NLP News Engine) | ⏳ Planned |
 | `v1.4-rc` | Milestone 11 (Signal Orchestration) | ⏳ Planned |
 | `v2.0` | Milestone 12 (Production Monitoring & Deployment) | ⏳ Planned |
