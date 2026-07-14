@@ -126,6 +126,13 @@ execution = [
 # all (stdlib `json`/`random`/`pathlib` plus `common` only). Installing the
 # foundation package alone (`.[dev]`) already covers everything it imports.
 # See docs/engineering-handbook/Architecture/ADR/ADR-016-LearningDecision-Contract.md.
+# `src/nlp` (Milestone 10) also has no extras group of its own for now --
+# Phase A (ingestion/cleaning/deduplication/storage) has no transitive
+# third-party dependency at all, same as `src/memory`. Phase B will need
+# `torch`/`transformers` for FinBERT sentiment scoring (already declared
+# under `trading` below); a dedicated `nlp` extra will be added in the
+# same change that adds Phase B's sentiment-scoring code, not speculatively
+# now. See docs/engineering-handbook/Architecture/ADR/ADR-018-NewsSignal-Contract.md.
 # Runtime dependencies of the pre-existing regime-trader/ and backtest/ code
 # trees, declared here for installability and documentation purposes only —
 # regime-trader/'s own trading logic (core/, broker/ minus the Milestone 2
@@ -144,7 +151,7 @@ trading = [
 
 [tool.setuptools.packages.find]
 where = ["src"]
-include = ["common*", "market_data*", "features*", "hmm*", "strategy*", "risk*", "execution*", "backtest*", "memory*"]
+include = ["common*", "market_data*", "features*", "hmm*", "strategy*", "risk*", "execution*", "backtest*", "memory*", "nlp*"]
 
 [tool.setuptools.package-data]
 common = ["py.typed"]
@@ -156,6 +163,7 @@ risk = ["py.typed"]
 execution = ["py.typed"]
 backtest = ["py.typed"]
 memory = ["py.typed"]
+nlp = ["py.typed"]
 
 # --------------------------------------------------------------------------
 # Ruff (lint + import sort). Scoped to the foundation/market-data packages
@@ -190,7 +198,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["common", "market_data", "features", "hmm", "strategy", "risk", "execution", "backtest", "memory"]
+known-first-party = ["common", "market_data", "features", "hmm", "strategy", "risk", "execution", "backtest", "memory", "nlp"]
 
 [tool.ruff.format]
 # Formatting is Black's responsibility (see [tool.black] below); Ruff is
@@ -245,6 +253,10 @@ module = [
     "ta",
     "hmmlearn.*",
     "scipy.*",
+    "torch.*",
+    "torch",
+    "transformers.*",
+    "transformers",
 ]
 ignore_missing_imports = true
 
@@ -260,9 +272,10 @@ testpaths = ["tests"]
 # Milestone 2 adapter at regime-trader/broker/alpaca_client.py are the only
 # consumer of this today; see tests/regime_trader/.
 pythonpath = ["src", "regime-trader"]
-addopts = "-ra --strict-markers --cov=common --cov=market_data --cov=features --cov=hmm --cov=strategy --cov=risk --cov=execution --cov=backtest --cov=memory --cov-report=term-missing"
+addopts = "-ra --strict-markers --cov=common --cov=market_data --cov=features --cov=hmm --cov=strategy --cov=risk --cov=execution --cov=backtest --cov=memory --cov=nlp --cov-report=term-missing"
 markers = [
     "performance: measures wall-clock performance against a milestone's documented targets (slower; see tests/features/test_performance.py and tests/hmm/test_performance.py)",
+    "integration: requires a real third-party model/service not installed by the base dev extras (e.g. FinBERT weights via 'torch'/'transformers'); see tests/nlp/test_sentiment_integration.py. Skips gracefully via pytest.importorskip when the dependency is absent, rather than failing collection.",
 ]
 asyncio_mode = "auto"
 filterwarnings = [
@@ -291,7 +304,7 @@ filterwarnings = [
 ]
 
 [tool.coverage.run]
-source = ["src/common", "src/market_data", "src/features", "src/hmm", "src/strategy", "src/risk", "src/execution", "src/backtest", "src/memory"]
+source = ["src/common", "src/market_data", "src/features", "src/hmm", "src/strategy", "src/risk", "src/execution", "src/backtest", "src/memory", "src/nlp"]
 branch = true
 
 [tool.coverage.report]

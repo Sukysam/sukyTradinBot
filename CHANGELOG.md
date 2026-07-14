@@ -21,6 +21,75 @@ and has no entry below. See [PROJECT_STATUS.md](PROJECT_STATUS.md)'s
 "Release Milestones" section for the full grouping and what each
 umbrella tag actually points at.
 
+## v0.10 - NLP & Event Processing (2026-07-14, tag `v0.10-nlp-news-engine`)
+
+### Added
+- `src/nlp/` -- a new, independently packaged platform: a **shadow-mode-
+  only** news signal pipeline that records a `NewsSignal` for every
+  processed story, without ever influencing `strategy`, `risk`, or
+  `execution`.
+- Built in three explicit phases, each independently verified before the
+  next began. Phase A (`store.py`, `normalize.py`): `InMemoryNewsItemStore`
+  and `JsonlNewsItemStore` -- deterministic ingestion and deduplication on
+  `(source, source_id)`, no sentiment model yet; `JsonlNewsItemStore`'s
+  `add` is idempotent, writing nothing to disk for a redelivered duplicate.
+  Phase B (`sentiment.py`, `service.py`): a batch-only `SentimentScorer`
+  Protocol -- no single-headline method exists, architecturally preventing
+  the per-headline scoring anti-pattern -- with two implementations:
+  `DeterministicSentimentScorer` (dependency-free, used by every Phase B/C
+  test) and `FinBertSentimentScorer` (adapts the legacy
+  `regime-trader/core/sentiment_engine.py::SentimentEngine`, lazy
+  `torch`/`transformers` import so the rest of `nlp` needs zero new
+  third-party dependencies). `NlpService.build_signals` assembles the
+  frozen `NewsSignal`. Phase C (`evaluation.py`): `evaluate_ingestion`,
+  `evaluate_sentiment`, `generate_evaluation_report` -- ingestion latency,
+  deduplication rate, sentiment distribution, processing throughput.
+  Read-only: no production influence, no state mutation.
+- A new `@pytest.mark.integration` marker (alongside the existing
+  `performance` marker) for `tests/nlp/test_sentiment_integration.py`,
+  which uses `pytest.importorskip` so `FinBertSentimentScorer`'s real
+  tests skip gracefully -- not fail -- in any environment (including this
+  repository's own base CI matrix) without the `trading` extra installed.
+- `ADR-018-NewsSignal-Contract.md` and `ADR-019-NLP-News-Engine-Design.md`
+  -- the `NewsSignal` contract freeze (adapting, not porting, the legacy
+  FinBERT `SentimentScore` and `NewsItem` shapes, with a new type-level
+  `sentiment_label`-matches-argmax check) and this milestone's three-phase
+  implementation decisions; binding spec: `Standards/NewsSignal
+  Contract.md`.
+- 105 new tests (`tests/nlp`) plus 5 in `tests/contracts`, plus 5
+  integration tests gated on `torch`/`transformers`. 100% line/branch
+  coverage on `src/nlp/` except `FinBertSentimentScorer`'s body (not
+  installed in this environment -- see Known limitations).
+- `benchmarks/v0.10-nlp-news-engine.json` -- a new benchmark category
+  (ingest, dedup check, batch sentiment scoring), all sub-millisecond and
+  pure in-memory.
+
+### Changed
+- Nothing in `strategy`, `risk`, or `execution` changed -- `src/nlp/`
+  gains no new dependency on any of them, and none of them gain a new
+  dependency on `src/nlp/`.
+
+### Known limitations
+- `FinBertSentimentScorer`'s real behavior is unverified by this
+  repository's own CI today -- `torch`/`transformers` (the `trading`
+  extra) aren't installed there. The `@pytest.mark.integration` marker
+  and `pytest.importorskip` guard make this an honest, visible gap
+  (the test file always exists and always attempts to run) rather than a
+  silently untested code path.
+- Entity extraction is deliberately deferred -- every `NewsSignal`
+  produced this milestone has `entities=()`. The frozen contract
+  explicitly allows this; a real extractor is future work.
+- Deduplication is exact `(source, source_id)` match only -- no fuzzy
+  cross-source duplicate detection (the same real story reported by two
+  different providers produces two separate `NewsSignal`s today).
+- `signal_id` is derived deterministically from `(source, source_id)`,
+  which assumes exactly one `NewsSignal` per stored `NewsItem` -- no
+  re-scoring or multiple signals per story in this milestone.
+- Letting a `NewsSignal` actually influence a real `StrategyDecision`/
+  `ExecutionDecision`/`OrderIntent` remains a separate, later,
+  explicitly-authorized decision -- that convergence is Milestone 11's
+  job (Signal Orchestration), not this one's.
+
 ## v0.9 - Adaptive Learning / Memory Loop (2026-07-14, tag `v0.9-memory-loop`)
 
 ### Added
