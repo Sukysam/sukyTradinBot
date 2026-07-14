@@ -24,4 +24,23 @@ class UnhealthyPlatformError(OpsError):
     invariant #4 exists to prevent."""
 
 
-__all__ = ["OpsError", "UnhealthyPlatformError"]
+class MissingSecretError(OpsError):
+    """Raised by `ops.secrets.resolve_secret` when a required secret is
+    not present in the injected `SecretSource`. Never carries the
+    secret's own value -- only its name -- since an exception message is
+    exactly the kind of thing that ends up in a log or a bug tracker."""
+
+
+class RuntimeValidationError(OpsError):
+    """Raised by `ops.validation.require_valid_runtime` when a
+    `ValidationResult` is not valid -- the fail-fast startup gate for
+    configuration/secrets, the same role `UnhealthyPlatformError` plays
+    for health checks."""
+
+
+__all__ = [
+    "MissingSecretError",
+    "OpsError",
+    "RuntimeValidationError",
+    "UnhealthyPlatformError",
+]
