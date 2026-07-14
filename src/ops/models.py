@@ -134,4 +134,54 @@ class PlatformHealth:
         )
 
 
-__all__ = ["HealthCheckResult", "HealthStatus", "PlatformHealth", "classify_status"]
+@dataclass(frozen=True)
+class PlatformInfo:
+    """Static build identity -- version, commit, when it was built, and
+    which Python it was built for. Deliberately separate from
+    `PlatformHealth`: `PlatformHealth` changes on every evaluation
+    (a check can flip from healthy to unhealthy between two calls),
+    `PlatformInfo` does not change for the lifetime of a running
+    process. Pairs naturally with `PlatformHealth` wherever an
+    operational endpoint, exported metric, or structured log line needs
+    to say *which build* produced a report, without exposing anything
+    about how that build works internally."""
+
+    version: str
+    git_commit: str
+    build_time: datetime
+    python_version: str
+
+    def __post_init__(self) -> None:
+        require_utc(self.build_time, "build_time")
+        if not self.version:
+            raise ValueError("version must not be empty")
+        if not self.git_commit:
+            raise ValueError("git_commit must not be empty")
+        if not self.python_version:
+            raise ValueError("python_version must not be empty")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "version": self.version,
+            "git_commit": self.git_commit,
+            "build_time": self.build_time.isoformat(),
+            "python_version": self.python_version,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> PlatformInfo:
+        return cls(
+            version=data["version"],
+            git_commit=data["git_commit"],
+            build_time=datetime.fromisoformat(data["build_time"]),
+            python_version=data["python_version"],
+        )
+
+
+__all__ = [
+    "HealthCheckResult",
+    "HealthStatus",
+    "PlatformHealth",
+    "PlatformInfo",
+    "classify_status",
+]
