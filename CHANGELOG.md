@@ -21,6 +21,66 @@ and has no entry below. See [PROJECT_STATUS.md](PROJECT_STATUS.md)'s
 "Release Milestones" section for the full grouping and what each
 umbrella tag actually points at.
 
+## Unreleased - Milestone 12 WP1: Health & Readiness (2026-07-14, no tag)
+
+Operational maturity work, not a domain-decision milestone -- per
+explicit product-owner direction, Milestone 12 is split into five
+independently-reviewable work packages instead of one contract-first
+implementation; this is the first, and does not get its own `vN-<name>`
+tag the way Milestones 1-11 each did (no umbrella version bump until
+Milestone 12 as a whole closes).
+
+### Added
+- `src/ops/` -- a new, independently packaged platform: aggregated
+  platform health reporting. Not built around a frozen domain contract
+  like `FinalDecision`/`NewsSignal` -- `ADR-022-Health-And-Readiness-
+  Design.md` records both the design and implementation decisions
+  together, since there is no preceding contract-freeze PR this time.
+- `PlatformHealth{status, checks, timestamp, version, git_commit}` and
+  `HealthCheckResult{name, healthy, detail, checked_at}` -- a stable,
+  documented operational model (not a business-domain contract).
+  `classify_status` is the single source of truth for aggregating
+  individual check results into one `HealthStatus`
+  (`HEALTHY`/`DEGRADED`/`UNHEALTHY`), cross-checked at
+  `PlatformHealth` construction so the two can never silently disagree.
+- `ops.checks.CallableHealthCheck` -- one generic wrapper around any
+  injected zero-argument probe, with ten named factory functions
+  (`configuration_check`, `market_data_check`, `model_artifact_check`,
+  `feature_registry_check`, `hmm_model_check`, `strategy_registry_check`,
+  `risk_service_check`, `execution_adapter_check`, `memory_store_check`,
+  `nlp_pipeline_check`) covering every subsystem the platform depends
+  on. A probe's exception is converted into a failing `HealthCheckResult`
+  rather than propagating, so one unreachable subsystem never prevents
+  the other nine from being reported.
+- `ops.health.evaluate_health`/`require_healthy` -- the aggregation
+  entrypoint and a fail-fast startup gate (`UnhealthyPlatformError`) for
+  production start-up code.
+- `ops.reporting.generate_health_report` -- a plain-text summary,
+  mirroring `backtest.reporting`/`memory.evaluation`/`nlp.evaluation`'s
+  own "consumes the model, never shapes it" rendering convention.
+- 55 new tests in `tests/ops/` (models, checks, health, reporting).
+  100% line/branch coverage on `src/ops/`.
+
+### Changed
+- Nothing in any existing package changed -- `src/ops/` has zero
+  transitive third-party dependencies and zero dependencies on any other
+  first-party package; it is a leaf.
+
+### Known limitations
+- Nothing in this milestone wires the ten check factories to real probes
+  (a live Alpaca connection check, an actual on-disk HMM-model check,
+  etc.) -- WP1 proves the aggregation/reporting layer against injected
+  probes; real-probe wiring belongs to whichever later work package
+  introduces the deployment entrypoint that constructs them for real.
+- The proposed six-module layout (`health.py`/`readiness.py`/
+  `startup.py`/`status.py`/`models.py`/`interfaces.py`) was deliberately
+  consolidated to five modules (`readiness`/`startup` are facets of the
+  same aggregation mechanism, not separate algorithms; `status` became
+  `reporting.py` for naming consistency with the rest of this codebase)
+  -- see ADR-022's "File-structure consolidation" decision.
+- WP2 (Observability), WP3 (Configuration & Secrets), WP4 (Deployment),
+  and WP5 (Operations) are not yet started.
+
 ## v0.11 - Signal Orchestration (2026-07-14, tag `v0.11-signal-orchestration`)
 
 ### Added
