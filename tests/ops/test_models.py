@@ -1,6 +1,7 @@
 """Tests for `ops.models`: `HealthCheckResult`, `PlatformHealth`,
-`PlatformInfo`, `RuntimeContext`, and `DeploymentInfo`'s
-construction-time invariants, serialization, and `classify_status`."""
+`PlatformInfo`, `RuntimeContext`, `DeploymentInfo`, and
+`DiagnosticReport`'s construction-time invariants, serialization, and
+`classify_status`."""
 
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ import pytest
 
 from ops.models import (
     DeploymentInfo,
+    DiagnosticReport,
     HealthCheckResult,
     HealthStatus,
     PlatformHealth,
@@ -77,6 +79,17 @@ def _health(**overrides: object) -> PlatformHealth:
     }
     defaults.update(overrides)
     return PlatformHealth(**defaults)  # type: ignore[arg-type]
+
+
+def _diagnostic(**overrides: object) -> DiagnosticReport:
+    defaults: dict[str, object] = {
+        "runtime_context": _context(),
+        "health": _health(),
+        "deployment_info": None,
+        "generated_at": T0,
+    }
+    defaults.update(overrides)
+    return DiagnosticReport(**defaults)  # type: ignore[arg-type]
 
 
 class TestHealthCheckResult:
@@ -277,3 +290,31 @@ class TestDeploymentInfo:
         deployment = _deployment()
         with pytest.raises(AttributeError):
             deployment.deployment_id = "other"  # type: ignore[misc]
+
+
+class TestDiagnosticReport:
+    def test_valid_report_constructs_without_deployment(self) -> None:
+        report = _diagnostic()
+        assert report.deployment_info is None
+
+    def test_valid_report_constructs_with_deployment(self) -> None:
+        report = _diagnostic(deployment_info=_deployment())
+        assert report.deployment_info is not None
+        assert report.deployment_info.deployment_id == "deploy-001"
+
+    def test_rejects_naive_generated_at(self) -> None:
+        with pytest.raises(ValueError, match="timezone-aware"):
+            _diagnostic(generated_at=datetime(2024, 1, 1))
+
+    def test_round_trips_through_dict_without_deployment(self) -> None:
+        report = _diagnostic()
+        assert DiagnosticReport.from_dict(report.to_dict()) == report
+
+    def test_round_trips_through_dict_with_deployment(self) -> None:
+        report = _diagnostic(deployment_info=_deployment())
+        assert DiagnosticReport.from_dict(report.to_dict()) == report
+
+    def test_is_frozen(self) -> None:
+        report = _diagnostic()
+        with pytest.raises(AttributeError):
+            report.generated_at = T0  # type: ignore[misc]
