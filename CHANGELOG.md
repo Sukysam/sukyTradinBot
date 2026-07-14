@@ -21,6 +21,57 @@ and has no entry below. See [PROJECT_STATUS.md](PROJECT_STATUS.md)'s
 "Release Milestones" section for the full grouping and what each
 umbrella tag actually points at.
 
+## Unreleased - Milestone 12 WP2: Observability (2026-07-14, no tag)
+
+Second of Milestone 12's five work packages. Per direct product-owner
+review of WP1: `PlatformHealth` is now the single operational model
+every WP2 module reads -- none recomputes health independently.
+Dashboards are explicitly out of scope ("should consume exported
+metrics rather than being part of the runtime").
+
+### Added
+- `ops.models.PlatformInfo{version, git_commit, build_time,
+  python_version}` -- static build identity, deliberately kept separate
+  from `PlatformHealth` (different recomputation cadence: `PlatformInfo`
+  never changes for a running process, `PlatformHealth` can flip between
+  any two evaluations).
+- `ops.metrics` -- `Counter`/`Gauge` primitives, a `MetricsRegistry`
+  with get-or-create semantics, `record_health_metrics` (reads a
+  `PlatformHealth`, writes one gauge per check plus one aggregate status
+  gauge), and `export_prometheus_text` (hand-written Prometheus
+  exposition-format text -- no `prometheus_client` dependency).
+- `ops.tracing` -- `Span{name, started_at, ended_at, metadata}` with a
+  derived `duration_seconds`, and `Tracer.span()`, a context manager
+  that times its block and calls every registered hook with the
+  completed `Span`. No distributed-tracing SDK integration (deliberately
+  deferred until a real backend is chosen).
+- `ops.logging.log_health_status`/`log_alert` -- structured
+  `health_status`/`alert_fired` operational events emitted through a
+  caller-supplied `logging.Logger`, built on `common.logging`'s existing
+  JSON formatter (`extra=` fields). Does not reconfigure logging.
+- `ops.alerts` -- `Alert`/`AlertSeverity`, `CallableAlertRule` (the same
+  generic-wrapper pattern `ops.checks.CallableHealthCheck` established),
+  named `unhealthy_platform_rule`/`degraded_platform_rule` factories, and
+  `evaluate_alerts(health, rules)`.
+- `ADR-023-Observability-Design.md` -- design and implementation
+  recorded together, same cadence as ADR-022.
+- 56 new tests in `tests/ops/` (167 total). 100% line/branch coverage on
+  `src/ops/`.
+
+### Changed
+- `ops.__version__` bumped `0.1.0` -> `0.2.0`.
+- Nothing in any existing package changed -- `src/ops/` remains pure
+  stdlib, zero transitive third-party dependencies.
+
+### Known limitations
+- `MetricsRegistry` has no thread-safety guarantees and no built-in HTTP
+  exposition endpoint -- serving `/metrics` (or pushing to a gateway) is
+  WP4 (Deployment)'s job, not WP2's.
+- `Tracer`'s hooks run synchronously in-process; no batching, async
+  export, or sampling.
+- WP3 (Configuration & Secrets), WP4 (Deployment), and WP5 (Operations)
+  are not yet started.
+
 ## Unreleased - Milestone 12 WP1: Health & Readiness (2026-07-14, no tag)
 
 Operational maturity work, not a domain-decision milestone -- per

@@ -1,5 +1,6 @@
-"""Tests for `ops.models`: `HealthCheckResult` and `PlatformHealth`'s
-construction-time invariants, serialization, and `classify_status`."""
+"""Tests for `ops.models`: `HealthCheckResult`, `PlatformHealth`, and
+`PlatformInfo`'s construction-time invariants, serialization, and
+`classify_status`."""
 
 from __future__ import annotations
 
@@ -7,7 +8,13 @@ from datetime import datetime, timezone
 
 import pytest
 
-from ops.models import HealthCheckResult, HealthStatus, PlatformHealth, classify_status
+from ops.models import (
+    HealthCheckResult,
+    HealthStatus,
+    PlatformHealth,
+    PlatformInfo,
+    classify_status,
+)
 
 UTC = timezone.utc
 T0 = datetime(2024, 1, 1, tzinfo=UTC)
@@ -22,6 +29,17 @@ def _result(**overrides: object) -> HealthCheckResult:
     }
     defaults.update(overrides)
     return HealthCheckResult(**defaults)  # type: ignore[arg-type]
+
+
+def _info(**overrides: object) -> PlatformInfo:
+    defaults: dict[str, object] = {
+        "version": "0.12.0",
+        "git_commit": "abc1234",
+        "build_time": T0,
+        "python_version": "3.9.6",
+    }
+    defaults.update(overrides)
+    return PlatformInfo(**defaults)  # type: ignore[arg-type]
 
 
 def _health(**overrides: object) -> PlatformHealth:
@@ -129,3 +147,34 @@ class TestPlatformHealth:
         health = _health()
         with pytest.raises(AttributeError):
             health.version = "0.13.0"  # type: ignore[misc]
+
+
+class TestPlatformInfo:
+    def test_valid_info_constructs(self) -> None:
+        info = _info()
+        assert info.version == "0.12.0"
+
+    def test_rejects_naive_build_time(self) -> None:
+        with pytest.raises(ValueError, match="timezone-aware"):
+            _info(build_time=datetime(2024, 1, 1))
+
+    def test_rejects_empty_version(self) -> None:
+        with pytest.raises(ValueError, match="version"):
+            _info(version="")
+
+    def test_rejects_empty_git_commit(self) -> None:
+        with pytest.raises(ValueError, match="git_commit"):
+            _info(git_commit="")
+
+    def test_rejects_empty_python_version(self) -> None:
+        with pytest.raises(ValueError, match="python_version"):
+            _info(python_version="")
+
+    def test_round_trips_through_dict(self) -> None:
+        info = _info()
+        assert PlatformInfo.from_dict(info.to_dict()) == info
+
+    def test_is_frozen(self) -> None:
+        info = _info()
+        with pytest.raises(AttributeError):
+            info.version = "0.13.0"  # type: ignore[misc]
