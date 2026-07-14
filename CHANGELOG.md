@@ -21,6 +21,58 @@ and has no entry below. See [PROJECT_STATUS.md](PROJECT_STATUS.md)'s
 "Release Milestones" section for the full grouping and what each
 umbrella tag actually points at.
 
+## Unreleased - Milestone 12 WP4: Deployment & Release Automation (2026-07-14, no tag)
+
+Fourth of Milestone 12's five work packages. Per direct instruction:
+keep this work package focused on deployment mechanics rather than
+runtime behavior, extend `src/ops/` only where runtime code is
+actually needed, and keep deployment-specific assets (workflows,
+manifests, scripts) outside `src/` where appropriate.
+
+### Added
+- `ops.models.DeploymentInfo{version, git_commit, build_time,
+  deployment_environment, deployment_id, rollback_target}` -- one
+  deployment instance, distinct from `PlatformInfo` (the build): the
+  same build can be deployed more than once, to more than one
+  environment, each a separate `DeploymentInfo`.
+- `ops.deployment.validate_deployment` -- checks a `DeploymentInfo`
+  actually describes the `RuntimeContext` it's paired with
+  (`version`/`git_commit` must match).
+- `ops.deployment.ReleaseManifest`/`compute_checksum`/
+  `verify_release_manifest` -- release-artifact SHA-256 checksum
+  verification. Both `validate_deployment` and `verify_release_manifest`
+  return `ops.validation.ValidationResult`, the same report shape
+  `validate_runtime` already uses; `require_valid_deployment` mirrors
+  `require_valid_runtime`.
+- `ops.rollback.select_rollback_target`/`require_rollback_target` --
+  picks the most recent prior deployment (excluding the current one)
+  from deployment history; raises `NoRollbackTargetError` when none
+  exists. A separate module from `ops.deployment` because it operates
+  on a *sequence* of deployments, not one.
+- `ADR-025-Deployment-And-Release-Automation-Design.md` -- design and
+  implementation recorded together, same cadence as ADR-022/023/024.
+- 33 new tests in `tests/ops/` (180 total). 100% line/branch coverage on
+  `src/ops/`.
+
+### Changed
+- `ops.__version__` bumped `0.3.0` -> `0.4.0`.
+- Nothing in any existing package changed -- `src/ops/` remains pure
+  stdlib, zero transitive third-party dependencies.
+
+### Known limitations
+- Deliberately deferred: literal Kubernetes manifests, a CI "deploy"
+  job, and any release/rollback shell script -- no deployment target
+  has been chosen for this platform. Only a `Dockerfile`/
+  `docker-compose.yml` (Milestone 1, build/run a container) and
+  `.github/workflows/ci.yml` (lint/type/test/build) exist; neither is a
+  deployment target. This work package builds the mechanism a real
+  deployment script would call into once a target is chosen, not the
+  script itself.
+- `DeploymentInfo`/rollback selection are not yet wired into `ops.health`,
+  `ops.metrics`, `ops.logging`, or `ops.alerts` -- no deployment or
+  rollback event triggers a metric, log line, or alert yet.
+- WP5 (Operations) is not yet started.
+
 ## Unreleased - Milestone 12 WP3: Configuration & Secrets (2026-07-14, no tag)
 
 Third of Milestone 12's five work packages, extending `src/ops/` per

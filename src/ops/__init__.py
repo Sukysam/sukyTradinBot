@@ -26,6 +26,14 @@ else in this package reads, never recomputes independently:
   validation, secret resolution, and (optionally) health checks into
   one immutable `RuntimeContext` -- this platform's operational runtime
   identity.
+- WP4 (Deployment & Release Automation): `ops.models.DeploymentInfo`
+  describes one deployment instance, distinct from `PlatformInfo` (the
+  build); `ops.deployment` validates a `DeploymentInfo` against a
+  `RuntimeContext` and verifies release-artifact checksums via
+  `ReleaseManifest`; `ops.rollback.select_rollback_target` picks the
+  last-known-good prior deployment from history. No CI/CD platform
+  integration -- no deployment target has been chosen yet; see
+  ADR-025-Deployment-And-Release-Automation-Design.md.
 """
 
 from __future__ import annotations
@@ -52,8 +60,17 @@ from ops.checks import (
     risk_service_check,
     strategy_registry_check,
 )
+from ops.deployment import (
+    ReleaseManifest,
+    compute_checksum,
+    require_valid_deployment,
+    validate_deployment,
+    verify_release_manifest,
+)
 from ops.exceptions import (
+    DeploymentValidationError,
     MissingSecretError,
+    NoRollbackTargetError,
     OpsError,
     RuntimeValidationError,
     UnhealthyPlatformError,
@@ -69,6 +86,7 @@ from ops.metrics import (
     record_health_metrics,
 )
 from ops.models import (
+    DeploymentInfo,
     HealthCheckResult,
     HealthStatus,
     PlatformHealth,
@@ -77,12 +95,13 @@ from ops.models import (
     classify_status,
 )
 from ops.reporting import generate_health_report
+from ops.rollback import require_rollback_target, select_rollback_target
 from ops.secrets import EnvSecretSource, SecretSource, SecretValue, resolve_secret
 from ops.startup import build_runtime_context
 from ops.tracing import Span, Tracer
 from ops.validation import ValidationResult, require_valid_runtime, validate_runtime
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
 
 __all__ = [
     "Alert",
@@ -91,6 +110,8 @@ __all__ = [
     "CallableAlertRule",
     "CallableHealthCheck",
     "Counter",
+    "DeploymentInfo",
+    "DeploymentValidationError",
     "EnvSecretSource",
     "Gauge",
     "HealthCheck",
@@ -98,9 +119,11 @@ __all__ = [
     "HealthStatus",
     "MetricsRegistry",
     "MissingSecretError",
+    "NoRollbackTargetError",
     "OpsError",
     "PlatformHealth",
     "PlatformInfo",
+    "ReleaseManifest",
     "RuntimeContext",
     "RuntimeValidationError",
     "SecretSource",
@@ -112,6 +135,7 @@ __all__ = [
     "__version__",
     "build_runtime_context",
     "classify_status",
+    "compute_checksum",
     "configuration_check",
     "degraded_platform_rule",
     "evaluate_alerts",
@@ -129,10 +153,15 @@ __all__ = [
     "nlp_pipeline_check",
     "record_health_metrics",
     "require_healthy",
+    "require_rollback_target",
+    "require_valid_deployment",
     "require_valid_runtime",
     "resolve_secret",
     "risk_service_check",
+    "select_rollback_target",
     "strategy_registry_check",
     "unhealthy_platform_rule",
+    "validate_deployment",
     "validate_runtime",
+    "verify_release_manifest",
 ]
