@@ -1,6 +1,6 @@
 """Tests for `ops.models`: `HealthCheckResult`, `PlatformHealth`,
-`PlatformInfo`, and `RuntimeContext`'s construction-time invariants,
-serialization, and `classify_status`."""
+`PlatformInfo`, `RuntimeContext`, and `DeploymentInfo`'s
+construction-time invariants, serialization, and `classify_status`."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 import pytest
 
 from ops.models import (
+    DeploymentInfo,
     HealthCheckResult,
     HealthStatus,
     PlatformHealth,
@@ -51,6 +52,18 @@ def _context(**overrides: object) -> RuntimeContext:
     }
     defaults.update(overrides)
     return RuntimeContext(**defaults)  # type: ignore[arg-type]
+
+
+def _deployment(**overrides: object) -> DeploymentInfo:
+    defaults: dict[str, object] = {
+        "version": "0.12.0",
+        "git_commit": "abc1234",
+        "build_time": T0,
+        "deployment_environment": "production",
+        "deployment_id": "deploy-001",
+    }
+    defaults.update(overrides)
+    return DeploymentInfo(**defaults)  # type: ignore[arg-type]
 
 
 def _health(**overrides: object) -> PlatformHealth:
@@ -212,3 +225,55 @@ class TestRuntimeContext:
         context = _context()
         with pytest.raises(AttributeError):
             context.environment = "test"  # type: ignore[misc]
+
+
+class TestDeploymentInfo:
+    def test_valid_deployment_constructs(self) -> None:
+        deployment = _deployment()
+        assert deployment.deployment_id == "deploy-001"
+        assert deployment.rollback_target is None
+
+    def test_rejects_naive_build_time(self) -> None:
+        with pytest.raises(ValueError, match="timezone-aware"):
+            _deployment(build_time=datetime(2024, 1, 1))
+
+    def test_rejects_empty_version(self) -> None:
+        with pytest.raises(ValueError, match="version"):
+            _deployment(version="")
+
+    def test_rejects_empty_git_commit(self) -> None:
+        with pytest.raises(ValueError, match="git_commit"):
+            _deployment(git_commit="")
+
+    def test_rejects_empty_deployment_environment(self) -> None:
+        with pytest.raises(ValueError, match="deployment_environment"):
+            _deployment(deployment_environment="")
+
+    def test_rejects_empty_deployment_id(self) -> None:
+        with pytest.raises(ValueError, match="deployment_id"):
+            _deployment(deployment_id="")
+
+    def test_rejects_empty_string_rollback_target(self) -> None:
+        with pytest.raises(ValueError, match="rollback_target"):
+            _deployment(rollback_target="")
+
+    def test_allows_none_rollback_target(self) -> None:
+        deployment = _deployment(rollback_target=None)
+        assert deployment.rollback_target is None
+
+    def test_allows_set_rollback_target(self) -> None:
+        deployment = _deployment(rollback_target="deploy-000")
+        assert deployment.rollback_target == "deploy-000"
+
+    def test_round_trips_through_dict(self) -> None:
+        deployment = _deployment(rollback_target="deploy-000")
+        assert DeploymentInfo.from_dict(deployment.to_dict()) == deployment
+
+    def test_round_trips_through_dict_without_rollback_target(self) -> None:
+        deployment = _deployment()
+        assert DeploymentInfo.from_dict(deployment.to_dict()) == deployment
+
+    def test_is_frozen(self) -> None:
+        deployment = _deployment()
+        with pytest.raises(AttributeError):
+            deployment.deployment_id = "other"  # type: ignore[misc]

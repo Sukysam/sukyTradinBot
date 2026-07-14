@@ -38,8 +38,26 @@ class RuntimeValidationError(OpsError):
     for health checks."""
 
 
+class DeploymentValidationError(OpsError):
+    """Raised by `ops.deployment.require_valid_deployment` when a
+    `ValidationResult` produced by `validate_deployment` or
+    `verify_release_manifest` is not valid -- the fail-fast gate that
+    stops a release before it proceeds, the same role
+    `RuntimeValidationError` plays for startup."""
+
+
+class NoRollbackTargetError(OpsError):
+    """Raised by `ops.rollback.require_rollback_target` when no prior
+    deployment is available to roll back to. A rollback attempted with
+    nothing to roll back to is exactly the kind of silent-no-op this
+    codebase's exceptions exist to prevent -- it must fail loudly, not
+    proceed as if the rollback happened."""
+
+
 __all__ = [
+    "DeploymentValidationError",
     "MissingSecretError",
+    "NoRollbackTargetError",
     "OpsError",
     "RuntimeValidationError",
     "UnhealthyPlatformError",

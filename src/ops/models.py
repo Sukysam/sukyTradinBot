@@ -228,7 +228,62 @@ class RuntimeContext:
         )
 
 
+@dataclass(frozen=True)
+class DeploymentInfo:
+    """One particular deployment instance -- distinct from
+    `PlatformInfo`, which describes the *build*: the same build
+    (`version`/`git_commit`) can be deployed more than once, to more
+    than one `deployment_environment`, each a different
+    `DeploymentInfo` with its own `deployment_id`. `rollback_target`,
+    when set, names the `deployment_id` this deployment would roll back
+    to if it needed to -- `None` means no rollback target has been
+    designated (e.g. this is the first deployment to this
+    environment)."""
+
+    version: str
+    git_commit: str
+    build_time: datetime
+    deployment_environment: str
+    deployment_id: str
+    rollback_target: str | None = None
+
+    def __post_init__(self) -> None:
+        require_utc(self.build_time, "build_time")
+        if not self.version:
+            raise ValueError("version must not be empty")
+        if not self.git_commit:
+            raise ValueError("git_commit must not be empty")
+        if not self.deployment_environment:
+            raise ValueError("deployment_environment must not be empty")
+        if not self.deployment_id:
+            raise ValueError("deployment_id must not be empty")
+        if self.rollback_target is not None and not self.rollback_target:
+            raise ValueError("rollback_target must not be an empty string; use None instead")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "version": self.version,
+            "git_commit": self.git_commit,
+            "build_time": self.build_time.isoformat(),
+            "deployment_environment": self.deployment_environment,
+            "deployment_id": self.deployment_id,
+            "rollback_target": self.rollback_target,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> DeploymentInfo:
+        return cls(
+            version=data["version"],
+            git_commit=data["git_commit"],
+            build_time=datetime.fromisoformat(data["build_time"]),
+            deployment_environment=data["deployment_environment"],
+            deployment_id=data["deployment_id"],
+            rollback_target=data.get("rollback_target"),
+        )
+
+
 __all__ = [
+    "DeploymentInfo",
     "HealthCheckResult",
     "HealthStatus",
     "PlatformHealth",
