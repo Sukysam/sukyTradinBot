@@ -21,6 +21,68 @@ and has no entry below. See [PROJECT_STATUS.md](PROJECT_STATUS.md)'s
 "Release Milestones" section for the full grouping and what each
 umbrella tag actually points at.
 
+## v0.11 - Signal Orchestration (2026-07-14, tag `v0.11-signal-orchestration`)
+
+### Added
+- `src/orchestration/` -- a new, independently packaged platform: the
+  first milestone whose purpose is *reconciling* `StrategyDecision`
+  (primary), `LearningDecision`, and `NewsSignal` (both advisory) rather
+  than producing an independent opinion.
+- Built in three explicit phases, each independently verified before the
+  next began. Phase A (`arbitration.py`, `signals.py`): `arbitrate` --
+  a single, deterministic rule (one disagreement cuts allocation, two
+  suppress it entirely) with context validation and agreement
+  classification factored into shared helpers from the start. Phase B
+  (`interfaces.py`, `policies/`): `ArbitrationPolicy`, a single-method
+  Protocol, behind four genuinely distinct mechanisms --
+  `SafetyFirstPolicy` (Phase A's original rule, now the default),
+  `ConsensusPolicy` (any disagreement suppresses), `WeightedVotePolicy`
+  (continuous blend, structurally can never fully suppress as long as
+  `strategy_weight > 0`), and `ConfidencePolicy` (scales by relative
+  confidence, independent of agreement direction). Phase C
+  (`evaluation.py`): `evaluate`/`generate_evaluation_report` --
+  agreement rate, signal conflict rate, strategy-vs-learner divergence,
+  news alignment, orchestration confidence, override frequency, read
+  from paired `(FinalDecision, LearningDecision, NewsSignal)` history.
+- `final_allocation` is type-level bounded to `[0.0, primary_allocation]`
+  on every policy -- no arbitration mechanism can let an advisory signal
+  manufacture conviction the Strategy Engine never had, mirroring
+  `ExecutionDecision.approved_allocation`'s bound one layer earlier.
+  `outcome` (`CONFIRMED`/`ADJUSTED`/`SUPPRESSED`) is validated against
+  the allocation fields at construction, the same discipline
+  `ExecutionDecision.decision_type` established.
+- `ADR-020-FinalDecision-Contract.md` and
+  `ADR-021-Signal-Orchestration-Design.md` -- the `FinalDecision`/
+  `SignalInput` contract freeze and this milestone's three-phase
+  implementation decisions; binding spec: `Standards/FinalDecision
+  Contract.md`.
+- 113 new tests: 105 in `tests/orchestration` (models, arbitration, four
+  policies, evaluation, performance) plus 8 in `tests/contracts`. 100%
+  line/branch coverage on `src/orchestration/`.
+- `benchmarks/v0.11-signal-orchestration.json` -- per-policy arbitration
+  latency (all four policies, sub-millisecond, pure in-memory).
+
+### Changed
+- Nothing in `strategy`, `memory`, `nlp`, `risk`, or `execution` changed
+  -- `src/orchestration/` depends on `strategy`/`memory`/`nlp`'s already-
+  frozen contracts (reading `StrategyDecision`/`LearningDecision`/
+  `NewsSignal`), but none of them gain a new dependency on
+  `orchestration`, and `risk` gains no new dependency on it either.
+
+### Known limitations
+- Wiring `FinalDecision` into `risk.RiskService` in place of
+  `StrategyDecision` remains explicitly not authorized -- the execution
+  path still runs on the unarbitrated `StrategyDecision`, exactly as
+  every milestone before this one. That wiring is a separate, later,
+  explicitly-reviewed decision.
+- The four policies' specific parameters (`disagreement_penalty = 0.5`,
+  `learner_weight = news_weight = 0.5`, etc.) are reasonable defaults,
+  not empirically tuned -- no real arbitration history exists yet to
+  tune them against.
+- `orchestration.evaluation`'s `strategy_vs_learner_divergence` requires
+  the raw `LearningDecision` alongside each `FinalDecision` (not derivable
+  from `SignalInput` alone, since `weight`'s meaning differs per policy).
+
 ## v0.10 - NLP & Event Processing (2026-07-14, tag `v0.10-nlp-news-engine`)
 
 ### Added
