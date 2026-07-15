@@ -21,6 +21,77 @@ and has no entry below. See [PROJECT_STATUS.md](PROJECT_STATUS.md)'s
 "Release Milestones" section for the full grouping and what each
 umbrella tag actually points at.
 
+## v2.0.0 - Milestone 12 Complete: Production Operations (2026-07-15, tag `v2.0.0`)
+
+The umbrella release marking completion of the full planned roadmap —
+all twelve milestones. Per this file's own convention, umbrella tags
+normally introduce no code of their own and get no entry (see
+`v1.0-alpha` above) — this one is the deliberate exception, written as
+a release-audit narrative summarizing the evolution from repository
+foundation through production operations, per direct request ahead of
+cutting this tag. `v2.0.0` points at the same commit as the WP5 merge
+below (Milestone 12 has no single `vN-<name>` milestone tag of its
+own — see [PROJECT_STATUS.md](PROJECT_STATUS.md)'s Release Milestones
+table for why).
+
+### The decision pipeline (Milestones 2–7, 11)
+
+Market Data (`src/market_data`) → Feature Engineering (`src/features`,
+`FeatureVector` v2) → HMM Regime Detection (`src/hmm`, `RegimeState`
+v1) → Strategy Engine (`src/strategy`, `StrategyDecision` v1) → Signal
+Orchestration (`src/orchestration`, `FinalDecision` v1, reconciling
+Strategy against advisory Memory/NLP input) → Risk Management
+(`src/risk`, `ExecutionDecision` v1, the one gate on order submission)
+→ Execution Layer (`src/execution`, `OrderIntent` v1) → Alpaca broker
+adapter. Every boundary in this chain is a frozen, versioned contract,
+each with its own ADR pair (freeze + design) and binding Standards
+document — see [docs/Compatibility.md](docs/Compatibility.md) for the
+full version/consumer matrix.
+
+### Supporting platforms (Milestones 8–10)
+
+Backtesting & Validation (`src/backtest`, `BacktestResult` v1) replays
+historical bars through the entire real pipeline above, never
+retraining models, verified against a mandatory golden-dataset
+regression baseline. Adaptive Learning (`src/memory`, `LearningDecision`
+v1) and NLP & Event Processing (`src/nlp`, `NewsSignal` v1) both run in
+shadow mode only — neither has ever influenced `strategy`/`risk`/
+`execution` at any point in this project; the "adaptive learning
+observes the system, it does not control it" principle held from
+Milestone 9 through today.
+
+### Operational maturity (Milestone 12)
+
+Unlike Milestones 1–11, each built around one frozen domain contract,
+Milestone 12 was deliberately built as five independently-merged work
+packages (PRs #21–#25) — operational maturity work has no business-
+domain contract to freeze ahead of it. `src/ops` (pure stdlib, zero
+transitive third-party dependencies throughout): `PlatformHealth`/ten
+subsystem health checks (WP1); metrics/tracing/structured logging/alert
+rules, all reading `PlatformHealth` as the single operational model
+(WP2); injectable secret resolution and fail-fast runtime validation,
+composed into an immutable `RuntimeContext` (WP3); deployment/rollback
+validation and release-artifact checksum verification, deliberately
+stopping short of any CI/CD platform integration since no deployment
+target has been chosen (WP4); and `DiagnosticReport` plus six
+`docs/operations/` runbooks translating all of the above into concrete
+release, incident-response, disaster-recovery, backup-restore, on-call,
+and production-readiness procedures (WP5).
+
+### What this release is and isn't
+
+`v2.0.0` marks the planned architecture complete: contract-first
+design, ADR governance (26 ADRs), compatibility tracking, benchmarks,
+golden-dataset regression tests, CI verification, and now operational
+tooling and runbooks, all in place. It is **not** a claim that the
+software is finished, validated against real market data, or
+authorized for live trading — see
+[docs/operations/production-checklist.md](docs/operations/production-checklist.md)
+for the explicit gate between "architecture complete" and "cleared to
+trade real capital," and
+[Architecture/Known Gaps.md](docs/engineering-handbook/Architecture/Known%20Gaps.md)
+for what remains open at the component level.
+
 ## Unreleased - Milestone 12 WP5: Operations & Runbooks (2026-07-14, no tag)
 
 Fifth and final work package of Milestone 12. Per direct instruction:

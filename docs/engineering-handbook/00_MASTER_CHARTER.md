@@ -265,17 +265,63 @@ sukyTradinBot/
 │                                   core/risk_manager.py, not a from-scratch build; consumes
 │                                   only strategy.models.StrategyDecision, no broker/memory/NLP
 │                                   integration; see Architecture/ADR/ADR-011-Risk-Manager-Design.md
+├── src/execution/                 execution layer (Milestone 7): converts an ExecutionDecision
+│                                   (plus PortfolioState) into a broker-agnostic OrderIntent —
+│                                   router, pluggable StopLossPolicy, OrderBuilder,
+│                                   AlpacaBrokerAdapter (the only module importing alpaca-py);
+│                                   see Architecture/ADR/ADR-013-Execution-Layer-Design.md
+├── src/backtest/                  backtesting & validation (Milestone 8): regime-aware equity
+│                                   backtesting harness replaying historical bars through the
+│                                   entire real pipeline (Market Data -> ... -> Execution),
+│                                   producing the canonical BacktestResult — distinct from the
+│                                   top-level backtest/ crypto sandbox; see
+│                                   Architecture/ADR/ADR-015-Backtesting-Engine-Design.md
+├── src/memory/                    adaptive learning / memory loop (Milestone 9, shadow mode
+│                                   only): contextual Thompson Sampling bandit over an
+│                                   append-only Experience Store, producing the canonical
+│                                   LearningDecision — never influences strategy/risk/execution;
+│                                   see Architecture/ADR/ADR-017-Memory-Loop-Design.md
+├── src/nlp/                       NLP & event processing (Milestone 10, shadow mode only):
+│                                   news ingestion/dedup, batch sentiment scoring
+│                                   (DeterministicSentimentScorer/FinBertSentimentScorer),
+│                                   producing the canonical NewsSignal — never influences
+│                                   strategy/risk/execution; see
+│                                   Architecture/ADR/ADR-019-NLP-News-Engine-Design.md
+├── src/orchestration/             signal orchestration (Milestone 11): reconciles
+│                                   StrategyDecision (primary) against advisory
+│                                   LearningDecision/NewsSignal via one of four pluggable
+│                                   ArbitrationPolicy implementations, producing the canonical
+│                                   FinalDecision — wiring into risk.RiskService not yet
+│                                   authorized; see
+│                                   Architecture/ADR/ADR-021-Signal-Orchestration-Design.md
+├── src/ops/                       operational maturity (Milestone 12, all 5 work packages):
+│                                   PlatformHealth/health checks (WP1), metrics/tracing/
+│                                   logging/alerts (WP2), runtime validation/secrets (WP3),
+│                                   deployment/rollback (WP4), DiagnosticReport (WP5) — not a
+│                                   domain-decision package, no frozen contract, pure stdlib;
+│                                   see Architecture/ADR/ADR-022 through ADR-026 and
+│                                   docs/operations/ for the operational runbooks it supports
 ├── tests/common/                  tests for src/common
 ├── tests/market_data/             tests for src/market_data
 ├── tests/features/                tests for src/features
 ├── tests/hmm/                     tests for src/hmm
 ├── tests/strategy/                tests for src/strategy
 ├── tests/risk/                     tests for src/risk
-├── tests/contracts/                cross-package regression suite verifying FeatureVector/
-│                                   RegimeState/StrategyDecision/ExecutionDecision's frozen
-│                                   shape, version metadata, serialization round-trips, and
-│                                   backward compatibility — distinct from each package's own
-│                                   unit tests
+├── tests/execution/                tests for src/execution
+├── tests/backtest/                 tests for src/backtest
+├── tests/memory/                   tests for src/memory
+├── tests/nlp/                      tests for src/nlp
+├── tests/orchestration/            tests for src/orchestration
+├── tests/ops/                      tests for src/ops
+├── tests/regression/                golden-dataset backtest regression baseline (Milestone 8) —
+│                                   compares every CI run against a checked-in synthetic
+│                                   scenario within documented tolerance
+├── tests/contracts/                cross-package regression suite verifying every frozen
+│                                   contract's (FeatureVector/RegimeState/StrategyDecision/
+│                                   ExecutionDecision/OrderIntent/BacktestResult/
+│                                   LearningDecision/NewsSignal/FinalDecision) shape, version
+│                                   metadata, serialization round-trips, and backward
+│                                   compatibility — distinct from each package's own unit tests
 ├── tests/regime_trader/           contract tests for the regime-trader/ <-> src/market_data
 │                                   adapter (see below) — the one exception to "tests/
 │                                   mirrors src/", since regime-trader/ isn't a package
@@ -293,17 +339,25 @@ sukyTradinBot/
 │                                   (no shared code with regime-trader/; lower stakes)
 │
 ├── docs/
-│   └── engineering-handbook/      this handbook — the single canonical documentation system
-│       ├── 00_MASTER_CHARTER.md   this file
-│       ├── README.md
-│       ├── 01–12_*.md             role charters
-│       ├── SOPs/                  standard operating procedures
-│       ├── Prompt Templates/      reusable prompts for common engineering tasks
-│       ├── Knowledge Base/        spec references, glossary, capability maps
-│       ├── Standards/             detailed coding/testing/documentation/risk standards
-│       ├── Architecture/          system design, data flow, known gaps
-│       └── _archive/              superseded documentation, kept for historical reference only
+│   ├── engineering-handbook/      this handbook — the single canonical documentation system
+│   │   ├── 00_MASTER_CHARTER.md   this file
+│   │   ├── README.md
+│   │   ├── 01–12_*.md             role charters
+│   │   ├── SOPs/                  standard operating procedures
+│   │   ├── Prompt Templates/      reusable prompts for common engineering tasks
+│   │   ├── Knowledge Base/        spec references, glossary, capability maps
+│   │   ├── Standards/             detailed coding/testing/documentation/risk standards
+│   │   ├── Architecture/          system design, data flow, known gaps, all 26 ADRs
+│   │   └── _archive/              superseded documentation, kept for historical reference only
+│   ├── operations/                operational runbooks (Milestone 12 WP5): release,
+│   │                               incident response, disaster recovery, backup/restore,
+│   │                               on-call guide, production checklist — see
+│   │                               Architecture/ADR/ADR-026-Operations-And-Diagnostics-Design.md
+│   └── Compatibility.md           per-package frozen-contract version/consumer matrix —
+│                                   check before changing anything a contract's shape depends on
 │
+├── benchmarks/                    per-milestone latency/throughput measurements (JSON),
+│                                   one file per implementation milestone from Milestone 3 on
 ├── config/                        non-secret app config (*.example.* checked in; real
 │                                   files gitignored) — not config/settings.yaml, the
 │                                   still-unbuilt trading config in Known Gaps item 1

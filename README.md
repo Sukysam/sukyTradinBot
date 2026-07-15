@@ -12,27 +12,45 @@ shipped in each tagged version.
 
 ## Repository layout
 
+The full decision pipeline, in the order data flows through it:
+
 ```
 src/common/         foundation package: config, logging, base interfaces, utilities
-src/market_data/    market data platform: provider-agnostic models, Alpaca historical +
-                     streaming providers, Parquet/DuckDB storage, validation, replay
-tests/common/        tests for src/common
-tests/market_data/   tests for src/market_data
-tests/regime_trader/ contract tests for regime-trader/'s adapter over src/market_data
-regime-trader/       the trading platform (HMM regime detection, risk management, execution)
-backtest/            standalone crypto strategy research sandbox
-docs/                the engineering handbook — read this first
+src/market_data/    provider-agnostic models, Alpaca historical + streaming providers,
+                     Parquet/DuckDB storage, validation, replay
+src/features/       causal feature pipeline -> FeatureVector (v2, frozen)
+src/hmm/            Gaussian HMM regime detection -> RegimeState (v1, frozen)
+src/strategy/       regime-tier allocation logic -> StrategyDecision (v1, frozen)
+src/risk/           validators/sizing/circuit breakers -> ExecutionDecision (v1, frozen)
+src/execution/      order construction + broker adapter -> OrderIntent (v1, frozen)
+src/backtest/       regime-aware equity backtesting harness -> BacktestResult (v1, frozen)
+src/memory/         adaptive learning (shadow mode) -> LearningDecision (v1, frozen)
+src/nlp/            news sentiment engine (shadow mode) -> NewsSignal (v1, frozen)
+src/orchestration/  reconciles Strategy/Memory/NLP signals -> FinalDecision (v1, frozen)
+src/ops/            operational maturity: health, observability, config/secrets,
+                     deployment/release, diagnostics — see docs/operations/
+tests/               one directory per src/ package, plus tests/contracts/ (cross-package
+                     contract-shape regression) and tests/regression/ (golden-dataset backtest)
+regime-trader/      the pre-existing trading platform this repo is incrementally replacing
+backtest/            standalone crypto strategy research sandbox (distinct from src/backtest/)
+docs/                the engineering handbook (read this first) + docs/operations/ runbooks
 config/              non-secret application configuration (*.example.yaml checked in; real files gitignored)
+benchmarks/          per-milestone latency/throughput measurements (JSON)
 .github/workflows/   CI
 ```
 
-Most of `regime-trader/` and all of `backtest/` are pre-existing code
-trees not yet brought under this repository's packaging and tooling — the
-one exception is `regime-trader/broker/alpaca_client.py`, a Milestone 2
-adapter that *is* under full tooling and test coverage. See
+Each `src/` package's frozen output contract, version, and consumers
+are tracked in [docs/Compatibility.md](docs/Compatibility.md) — check
+it before changing anything a contract's shape depends on.
+`regime-trader/` and the top-level `backtest/` sandbox are pre-existing
+code trees, most of which are not yet brought under this repository's
+packaging and tooling; the one exception is
+`regime-trader/broker/alpaca_client.py`, a Milestone 2 adapter under
+full tooling and test coverage. See
 [Architecture/Known Gaps.md](docs/engineering-handbook/Architecture/Known%20Gaps.md)
 in the handbook for what's built versus planned, and
-[Architecture/ADR/](docs/engineering-handbook/Architecture/ADR/) for why.
+[Architecture/ADR/](docs/engineering-handbook/Architecture/ADR/) (26
+ADRs as of Milestone 12) for why.
 
 ## Getting started
 
