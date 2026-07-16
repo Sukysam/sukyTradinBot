@@ -21,11 +21,20 @@ from typing import Callable
 from common.errors import AppError
 from common.interfaces import Clock
 from market_data.interfaces import HistoricalDataProvider
-from market_data.models import Timeframe
+from market_data.models import Bar, Timeframe
 
 logger = logging.getLogger(__name__)
 
 AsyncSleep = Callable[[float], Awaitable[None]]
+
+# Deliberately synchronous, unlike `market_data.interfaces.BarHandler`
+# (`Callable[[Bar], Awaitable[None]]`) -- that type exists for
+# `AlpacaStreamingProvider`'s async streaming context. `_poll_symbol` is
+# itself synchronous, and Phase B's only consumer
+# (`app.features_loop.FeatureVectorEmitter.handle_bar`) does synchronous,
+# CPU-bound work (no I/O), so an async callback type here would add
+# event-loop plumbing this loop doesn't need.
+BarCallback = Callable[[Bar], None]
 
 _EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 
@@ -43,6 +52,14 @@ class MarketDataLoop:
     up to `poll_interval_seconds` after being called. Acceptable for
     Phase A (no trading happens here); a tighter shutdown bound would
     matter once orders are involved, not before.
+
+    `on_bar`, if given, is called once per newly-seen bar, after it's
+    logged -- the one extension point later phases use to react to bars
+    (Phase B: compute features) without this class needing to know what
+    they do with them. A callback failure is caught and logged, never
+    propagated -- one symbol's downstream processing failing must not
+    stop this loop from polling every other symbol, matching this
+    class's own fetch-failure-isolation convention.
     """
 
     def __init__(
@@ -55,6 +72,7 @@ class MarketDataLoop:
         lookback: timedelta,
         clock: Clock,
         sleep: AsyncSleep = asyncio.sleep,
+        on_bar: BarCallback | None = None,
     ) -> None:
         self._provider = provider
         self._symbols = tuple(symbols)
@@ -63,6 +81,7 @@ class MarketDataLoop:
         self._lookback = lookback
         self._clock = clock
         self._sleep = sleep
+        self._on_bar = on_bar
         self._stop_requested = False
         self._last_seen: dict[str, datetime] = {}
 
@@ -105,8 +124,20 @@ class MarketDataLoop:
                     "volume": bar.volume,
                 },
             )
+            if self._on_bar is not None:
+                try:
+                    self._on_bar(bar)
+                except Exception as exc:
+                    logger.warning(
+                        "on_bar callback failed",
+                        extra={
+                            "event": "on_bar_callback_failed",
+                            "symbol": bar.symbol,
+                            "error": str(exc),
+                        },
+                    )
         if new_bars:
             self._last_seen[symbol] = new_bars[-1].timestamp
 
 
-__all__ = ["AsyncSleep", "MarketDataLoop"]
+__all__ = ["AsyncSleep", "BarCallback", "MarketDataLoop"]

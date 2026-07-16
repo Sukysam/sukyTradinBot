@@ -86,6 +86,78 @@ packages established.
 - Phases B through G (features, regime detection, strategy, signal
   orchestration, risk, paper execution) are not yet started.
 
+## Unreleased - Runtime Phase B: Feature Pipeline (2026-07-16, no tag)
+
+Second of seven post-`v2.0.0` runtime phases. Wires `MarketDataLoop` to
+`FeaturePipeline` so the runtime produces valid `FeatureVector` objects
+from live market data -- nothing beyond that (no HMM, no strategy, no
+execution). Design and implementation recorded together in ADR-028,
+extending Phase A's `app.bootstrap`/`app.runtime` rather than rewriting
+either, per ADR-027's own Consequences prediction.
+
+### Added
+- `app.buffer.BarBuffer` -- bounded per-symbol bar history via
+  `collections.deque(maxlen=200)`, sized above the largest registered
+  feature lookback (100 bars, `features/statistical.py`), keeping
+  memory bounded for the life of the process regardless of runtime.
+- `app.runtime.MarketDataLoop` gains an optional, additive `on_bar:
+  BarCallback | None` constructor parameter -- called once per new bar
+  after it's logged. `BarCallback = Callable[[Bar], None]`, deliberately
+  synchronous (unlike `market_data.interfaces.BarHandler`'s async
+  shape, built for the streaming-provider context). A callback failure
+  is caught and logged (`on_bar_callback_failed`), never propagated.
+- `app.features_loop.FeatureVectorEmitter` -- `handle_bar(bar)` appends
+  to a `BarBuffer`, calls `FeaturePipeline.compute(strict=False)`, logs
+  one `feature_vector_computed` event per success (symbol, timestamp,
+  `PIPELINE_VERSION`, feature count, latency), and records `ops.metrics
+  .MetricsRegistry`'s first real production metrics
+  (`feature_vectors_emitted_total` counter, `feature_pipeline_latency_
+  seconds` gauge, `feature_computation_errors_total` counter). A
+  computation failure is caught and logged (`feature_computation_
+  failed`), never propagated. Exposes an optional `on_feature_vector`
+  hook for the next phase (Phase C: regime inference).
+- `app.config.FeatureLoopConfig` -- composes `MarketDataLoopConfig`
+  plus `max_bars_per_symbol` (default `200`).
+- `app.bootstrap.build_market_data_loop` gains two additive, optional
+  parameters -- `on_bar` and `extra_checks: Sequence[HealthCheck]` --
+  both defaulting to values that reproduce Phase A's exact prior
+  behavior.
+- `app.bootstrap.build_feature_loop` -- Phase B's composition root:
+  builds a `FeatureVectorEmitter`, then delegates to
+  `build_market_data_loop` with `on_bar=emitter.handle_bar` and
+  `extra_checks=[feature_registry_check(...)]`. Returns `(loop,
+  runtime_context, emitter)`.
+- `app.main` now builds and runs the Phase B pipeline via
+  `build_feature_loop` instead of Phase A's bare `build_market_data_
+  loop` -- as of Phase B, "the runtime" means market data plus feature
+  computation.
+- 24 new tests across `tests/app/` (`test_buffer.py`,
+  `test_features_loop.py`, plus additions to `test_runtime.py`,
+  `test_bootstrap.py`, `test_config.py`), bringing `tests/app/` to 43
+  total (up from 19).
+
+### Changed
+- `app.__version__` bumped `0.1.0` -> `0.2.0`; `app.bootstrap.
+  __version__` (used for `RuntimeContext.platform_info.version`)
+  likewise bumped `0.1.0` -> `0.2.0`.
+- Nothing in Phase A's tested public behavior changed --
+  `MarketDataLoop.on_bar` and `build_market_data_loop`'s new parameters
+  are both optional and default to the prior behavior exactly.
+
+### Known limitations
+- `app.buffer`/`app.features_loop`/`app.config`/`app.runtime`/
+  `app.__init__`/`app.exceptions` are at 100% test coverage;
+  `app.bootstrap` is at 97% (same one disclosed real-provider-
+  construction line as Phase A, still untested for the same reason);
+  `app.main` is at 43% (same disclosed signal-handling gap as Phase A).
+- `FeaturePipeline.compute(strict=False)` is called on every new bar
+  regardless of how little history exists -- early vectors will have
+  most or all features flagged in `quality_flags`. Intentional (see
+  ADR-028), not a bug: a consumer that cares about warm-up state reads
+  `quality_flags`/`has_any_flag` off the emitted vector.
+- Phases C through G (regime detection, strategy, signal orchestration,
+  risk, paper execution) are not yet started.
+
 ## v2.0.0 - Milestone 12 Complete: Production Operations (2026-07-15, tag `v2.0.0`)
 
 The umbrella release marking completion of the full planned roadmap —

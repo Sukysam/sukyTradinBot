@@ -33,4 +33,19 @@ class MarketDataLoopConfig:
             raise ValueError("lookback must be positive")
 
 
-__all__ = ["MarketDataLoopConfig"]
+@dataclass(frozen=True)
+class FeatureLoopConfig:
+    """What Phase B needs beyond `MarketDataLoopConfig`: how much bar
+    history to retain per symbol for feature computation. `market_data`
+    is composed, not duplicated -- Phase B still needs every Phase A
+    setting (which symbols, how often)."""
+
+    market_data: MarketDataLoopConfig
+    max_bars_per_symbol: int = 200
+
+    def __post_init__(self) -> None:
+        if self.max_bars_per_symbol <= 0:
+            raise ValueError("max_bars_per_symbol must be positive")
+
+
+__all__ = ["FeatureLoopConfig", "MarketDataLoopConfig"]

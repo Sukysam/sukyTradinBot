@@ -12,9 +12,10 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.bootstrap import build_market_data_loop, current_git_commit
-from app.config import MarketDataLoopConfig
+from app.bootstrap import build_feature_loop, build_market_data_loop, current_git_commit
+from app.config import FeatureLoopConfig, MarketDataLoopConfig
 from app.exceptions import GitCommitUnavailableError
+from app.features_loop import FeatureVectorEmitter
 from app.runtime import MarketDataLoop
 from market_data.errors import ProviderConnectionError
 from market_data.models import Bar, Timeframe
@@ -87,7 +88,7 @@ class TestBuildMarketDataLoop:
         loop, runtime_context = build_market_data_loop(_config(), provider=_FakeProvider())
         assert isinstance(loop, MarketDataLoop)
         assert isinstance(runtime_context, RuntimeContext)
-        assert runtime_context.platform_info.version == "0.1.0"
+        assert runtime_context.platform_info.version == "0.2.0"
 
     def test_raises_runtime_validation_error_when_secret_missing(
         self, monkeypatch: pytest.MonkeyPatch
@@ -99,3 +100,44 @@ class TestBuildMarketDataLoop:
     def test_raises_unhealthy_platform_error_when_connectivity_check_fails(self) -> None:
         with pytest.raises(UnhealthyPlatformError):
             build_market_data_loop(_config(), provider=_FakeProvider(healthy=False))
+
+    def test_on_bar_is_passed_through_to_the_loop(self) -> None:
+        received: list[Bar] = []
+        callback = received.append
+        loop, _ = build_market_data_loop(_config(), provider=_FakeProvider(), on_bar=callback)
+        assert loop._on_bar is callback
+
+
+def _feature_config() -> FeatureLoopConfig:
+    return FeatureLoopConfig(market_data=_config())
+
+
+class TestBuildFeatureLoop:
+    def test_builds_a_loop_context_and_emitter_when_healthy(self) -> None:
+        loop, runtime_context, emitter = build_feature_loop(
+            _feature_config(), provider=_FakeProvider()
+        )
+        assert isinstance(loop, MarketDataLoop)
+        assert isinstance(runtime_context, RuntimeContext)
+        assert isinstance(emitter, FeatureVectorEmitter)
+        assert runtime_context.platform_info.version == "0.2.0"
+
+    def test_wires_the_emitter_as_the_loops_on_bar_callback(self) -> None:
+        loop, _, emitter = build_feature_loop(_feature_config(), provider=_FakeProvider())
+        assert loop._on_bar == emitter.handle_bar
+
+    def test_emitter_metrics_start_empty(self) -> None:
+        _, _, emitter = build_feature_loop(_feature_config(), provider=_FakeProvider())
+        assert emitter.metrics.counters == ()
+        assert emitter.metrics.gauges == ()
+
+    def test_raises_runtime_validation_error_when_secret_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("ALPACA_API_KEY", raising=False)
+        with pytest.raises(RuntimeValidationError):
+            build_feature_loop(_feature_config(), provider=_FakeProvider())
+
+    def test_raises_unhealthy_platform_error_when_connectivity_check_fails(self) -> None:
+        with pytest.raises(UnhealthyPlatformError):
+            build_feature_loop(_feature_config(), provider=_FakeProvider(healthy=False))
