@@ -39,9 +39,11 @@ class _FakeBarsClient:
         self.response = response
         self.fail_times = fail_times
         self.calls = 0
+        self.last_request: object | None = None
 
     def get_stock_bars(self, request_params: object) -> object:
         self.calls += 1
+        self.last_request = request_params
         if self.calls <= self.fail_times:
             raise ConnectionError("simulated transient failure")
         return self.response
@@ -75,6 +77,7 @@ def _make_provider(
     bars_response: object | None = None,
     bars_fail_times: int = 0,
     corporate_actions_response: object | None = None,
+    **provider_kwargs: object,
 ) -> tuple[AlpacaHistoricalProvider, _FakeBarsClient, _FakeCorporateActionsClient]:
     bars_client = _FakeBarsClient(bars_response, fail_times=bars_fail_times)
     ca_client = _FakeCorporateActionsClient(corporate_actions_response or SimpleNamespace(data={}))
@@ -83,6 +86,7 @@ def _make_provider(
         corporate_actions_client=ca_client,
         rate_limiter=_no_wait_rate_limiter(),
         retry_policy=_fast_retry_policy(),
+        **provider_kwargs,  # type: ignore[arg-type]
     )
     return provider, bars_client, ca_client
 
@@ -135,6 +139,30 @@ class TestGetBars:
 
         assert len(bars) == 1
         assert bars[0].close == 101.0  # last wins, per validation.deduplicate_bars
+
+    def test_defaults_to_iex_feed(self) -> None:
+        from alpaca.data.enums import DataFeed
+
+        ts = datetime(2026, 6, 1, 9, 30, tzinfo=UTC)
+        provider, bars_client, _ = _make_provider(bars_response=SimpleNamespace(data={}))
+
+        provider.get_bars("AAPL", ts, ts, Timeframe.MIN_1)
+
+        assert bars_client.last_request is not None
+        assert bars_client.last_request.feed == DataFeed.IEX  # type: ignore[attr-defined]
+
+    def test_accepts_explicit_sip_feed(self) -> None:
+        from alpaca.data.enums import DataFeed
+
+        ts = datetime(2026, 6, 1, 9, 30, tzinfo=UTC)
+        provider, bars_client, _ = _make_provider(
+            bars_response=SimpleNamespace(data={}), feed=DataFeed.SIP
+        )
+
+        provider.get_bars("AAPL", ts, ts, Timeframe.MIN_1)
+
+        assert bars_client.last_request is not None
+        assert bars_client.last_request.feed == DataFeed.SIP  # type: ignore[attr-defined]
 
     def test_rejects_unsupported_timeframe(self) -> None:
         provider, _, _ = _make_provider(bars_response=SimpleNamespace(data={}))

@@ -8,10 +8,13 @@ client needs is confirmed against the actually-installed SDK
 dict[str, list[alpaca.data.models.bars.Bar]]`, and
 `CorporateActionsClient.get_corporate_actions(CorporateActionsRequest(...))
 -> CorporateActionsSet` with `CorporateActionsSet.data: dict[str, list[...]]`
-grouped by action type). This has not been exercised against a live Alpaca
-account in this environment (no credentials available) — see
-docs/engineering-handbook/Architecture/ADR/ADR-002-Market-Data.md's
-verification note.
+grouped by action type). Exercised against a live Alpaca paper account
+during the runtime Phase A build (see
+docs/engineering-handbook/Architecture/ADR/ADR-027-Runtime-Market-Data-Loop-Design.md)
+— confirmed working end to end, which is also how the `feed` gap below
+was found: querying without an explicit `feed` defaults to Alpaca's SIP
+feed, which a free-tier account cannot query for recent data (`403
+subscription does not permit querying recent SIP data`).
 
 Per docs/engineering-handbook/03_BACKEND_ENGINEER.md's coding standards:
 the Alpaca SDK client is always injected, never constructed inside
@@ -27,6 +30,7 @@ import logging
 from datetime import date, datetime, timezone
 from typing import Protocol
 
+from alpaca.data.enums import DataFeed
 from alpaca.data.historical.corporate_actions import CorporateActionsClient
 from alpaca.data.historical.stock import StockHistoricalDataClient
 from alpaca.data.models.corporate_actions import CashDividend, ForwardSplit, ReverseSplit
@@ -82,6 +86,13 @@ class AlpacaHistoricalProvider:
     the SDK client's `get_stock_bars` call — this provider adds retry
     (via `common.retry`), rate limiting, and conversion into this
     package's provider-agnostic models on top.
+
+    `feed` defaults to `DataFeed.IEX` -- matching
+    `AlpacaStreamingProvider._default_stream_client`'s existing default
+    -- rather than the SDK's own default (`DataFeed.SIP`), which a
+    free-tier account cannot query for data less than ~15 minutes old.
+    Pass `feed=DataFeed.SIP` explicitly for a paid market-data
+    subscription; never assume one is available.
     """
 
     def __init__(
@@ -92,6 +103,7 @@ class AlpacaHistoricalProvider:
         credentials: AlpacaCredentials | None = None,
         rate_limiter: RateLimiter | None = None,
         retry_policy: RetryPolicy | None = None,
+        feed: DataFeed = DataFeed.IEX,
     ) -> None:
         if bars_client is None:
             bars_client = _default_bars_client(credentials or load_alpaca_credentials())
@@ -105,6 +117,7 @@ class AlpacaHistoricalProvider:
             ALPACA_DEFAULT_REQUESTS_PER_MINUTE
         )
         self._retry_policy = retry_policy or RetryPolicy(exceptions=(ProviderConnectionError,))
+        self._feed = feed
 
     def get_bars(
         self, symbol: str, start: datetime, end: datetime, timeframe: Timeframe
@@ -117,6 +130,7 @@ class AlpacaHistoricalProvider:
             timeframe=_TIMEFRAME_MAP[timeframe],
             start=start,
             end=end,
+            feed=self._feed,
         )
 
         def _fetch() -> object:
