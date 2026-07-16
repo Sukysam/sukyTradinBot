@@ -110,11 +110,7 @@ class OrchestrationEmitter:
             return None
 
     def handle_frame(self, frame: RuntimeFrame) -> RuntimeFrame | None:
-        if frame.strategy_decision is None:
-            raise ValueError(
-                "RuntimeFrame reached OrchestrationEmitter without a strategy_decision"
-            )
-        strategy_decision = frame.strategy_decision
+        strategy_decision = frame.require_strategy_decision()
 
         learning_decision = self._learning_decision(strategy_decision)
         news_signal = self._news_signal(strategy_decision)

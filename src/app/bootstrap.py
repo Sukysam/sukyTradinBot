@@ -37,6 +37,7 @@ from app.orchestration_loop import (
 )
 from app.pipeline import compose_pipeline
 from app.regime_loop import RegimeEmitter
+from app.risk_loop import AccountStateProvider, PortfolioStateProvider, RiskEmitter
 from app.runtime import BarCallback, MarketDataLoop
 from app.strategy_loop import StrategyEmitter
 from common.config import Settings
@@ -50,6 +51,7 @@ from ops.checks import (
     feature_registry_check,
     hmm_model_check,
     market_data_check,
+    risk_service_check,
     strategy_registry_check,
 )
 from ops.interfaces import HealthCheck
@@ -59,6 +61,7 @@ from ops.startup import build_runtime_context
 from ops.validation import require_valid_runtime, validate_runtime
 from orchestration.config import OrchestrationConfig
 from orchestration.interfaces import ArbitrationPolicy
+from risk.service import RiskService
 from strategy.config import StrategyEngineConfig
 from strategy.registry import StrategyRegistry
 from strategy.service import StrategyService
@@ -67,8 +70,9 @@ _REQUIRED_SECRETS = ("ALPACA_API_KEY", "ALPACA_SECRET_KEY")
 
 # Bumped 0.1.0 -> 0.2.0 for Phase B (feature pipeline, ADR-028) -> 0.3.0
 # for Phase C (regime detection, ADR-029) -> 0.4.0 for Phase D (strategy
-# engine, ADR-030) -> 0.5.0 for Phase E (signal orchestration, ADR-031).
-__version__ = "0.5.0"
+# engine, ADR-030) -> 0.5.0 for Phase E (signal orchestration, ADR-031)
+# -> 0.6.0 for Phase F (risk management, ADR-032).
+__version__ = "0.6.0"
 
 # One day back avoids the free-tier "recent SIP data" restriction the
 # probe would otherwise hit -- see ADR-027 and
@@ -148,6 +152,37 @@ def _build_strategy_stage(
     checks: list[HealthCheck] = [
         strategy_registry_check(lambda: len(strategy_registry.names()) > 0)
     ]
+    return emitter, checks
+
+
+def _build_orchestration_stage(
+    *,
+    policy: ArbitrationPolicy | None,
+    config: OrchestrationConfig | None,
+    learning_decision_provider: LearningDecisionProvider | None,
+    news_signal_provider: NewsSignalProvider | None,
+) -> tuple[OrchestrationEmitter, list[HealthCheck]]:
+    emitter = OrchestrationEmitter(
+        policy=policy,
+        config=config,
+        learning_decision_provider=learning_decision_provider,
+        news_signal_provider=news_signal_provider,
+    )
+    # No health check: arbitration has no persisted resource or external
+    # dependency of its own to sanity-check -- `policy` is either the
+    # always-available default `SafetyFirstPolicy` or a caller-supplied,
+    # already-constructed object.
+    return emitter, []
+
+
+def _build_risk_stage(
+    risk_service: RiskService | None,
+    portfolio_state_provider: PortfolioStateProvider,
+    account_state_provider: AccountStateProvider,
+) -> tuple[RiskEmitter, list[HealthCheck]]:
+    service = risk_service or RiskService.default()
+    emitter = RiskEmitter(service, portfolio_state_provider, account_state_provider)
+    checks: list[HealthCheck] = [risk_service_check(lambda: len(service.validators) > 0)]
     return emitter, checks
 
 
@@ -361,7 +396,7 @@ def build_orchestration_loop(
     feature_emitter, feature_checks = _build_feature_stage(config.feature_loop)
     regime_emitter, regime_checks = _build_regime_stage(config, regime_service)
     strategy_emitter, strategy_checks = _build_strategy_stage(strategy_registry, strategy_config)
-    orchestration_emitter = OrchestrationEmitter(
+    orchestration_emitter, orchestration_checks = _build_orchestration_stage(
         policy=policy,
         config=orchestration_config,
         learning_decision_provider=learning_decision_provider,
@@ -377,7 +412,7 @@ def build_orchestration_loop(
             strategy_emitter.handle_frame,
             orchestration_emitter.handle_frame,
         ),
-        extra_checks=[*feature_checks, *regime_checks, *strategy_checks],
+        extra_checks=[*feature_checks, *regime_checks, *strategy_checks, *orchestration_checks],
     )
     return (
         loop,
@@ -389,11 +424,95 @@ def build_orchestration_loop(
     )
 
 
+def build_risk_loop(
+    config: RegimeLoopConfig,
+    regime_service: RegimeService,
+    strategy_registry: StrategyRegistry,
+    portfolio_state_provider: PortfolioStateProvider,
+    account_state_provider: AccountStateProvider,
+    *,
+    risk_service: RiskService | None = None,
+    strategy_config: StrategyEngineConfig | None = None,
+    policy: ArbitrationPolicy | None = None,
+    orchestration_config: OrchestrationConfig | None = None,
+    learning_decision_provider: LearningDecisionProvider | None = None,
+    news_signal_provider: NewsSignalProvider | None = None,
+    feed: DataFeed = DataFeed.IEX,
+    provider: HistoricalDataProvider | None = None,
+) -> tuple[
+    MarketDataLoop,
+    RuntimeContext,
+    FeatureVectorEmitter,
+    RegimeEmitter,
+    StrategyEmitter,
+    OrchestrationEmitter,
+    RiskEmitter,
+]:
+    """Phase F composition root -- the full A-F pipeline: `MarketDataLoop
+    -> FeatureVectorEmitter -> RegimeEmitter -> StrategyEmitter ->
+    OrchestrationEmitter -> RiskEmitter`, composed into one `on_bar`
+    callback via `app.pipeline.compose_pipeline`. The runtime stops at
+    `ExecutionDecision` -- no broker calls, no order submission; Phase G
+    is a separate, later, explicitly authorized decision.
+
+    `risk_service` defaults to `RiskService.default()` if not given --
+    unlike `regime_service`/`strategy_registry`, a sensible default risk
+    pipeline (`BuyingPowerValidator` + `ExposureCapacitySizing` +
+    `DrawdownCircuitBreaker`) needs no trained model or per-model
+    domain mapping to be meaningful; see `RiskService.default`'s own
+    docstring. `portfolio_state_provider`/`account_state_provider`
+    remain required, with no default -- portfolio/account state is
+    live, per-account data this runtime has no broker-query component
+    to fetch yet (that's Phase G's job). See ADR-032.
+    """
+    feature_emitter, feature_checks = _build_feature_stage(config.feature_loop)
+    regime_emitter, regime_checks = _build_regime_stage(config, regime_service)
+    strategy_emitter, strategy_checks = _build_strategy_stage(strategy_registry, strategy_config)
+    orchestration_emitter, orchestration_checks = _build_orchestration_stage(
+        policy=policy,
+        config=orchestration_config,
+        learning_decision_provider=learning_decision_provider,
+        news_signal_provider=news_signal_provider,
+    )
+    risk_emitter, risk_checks = _build_risk_stage(
+        risk_service, portfolio_state_provider, account_state_provider
+    )
+    loop, runtime_context = build_market_data_loop(
+        config.feature_loop.market_data,
+        feed=feed,
+        provider=provider,
+        on_bar=compose_pipeline(
+            feature_emitter.handle_bar,
+            regime_emitter.handle_frame,
+            strategy_emitter.handle_frame,
+            orchestration_emitter.handle_frame,
+            risk_emitter.handle_frame,
+        ),
+        extra_checks=[
+            *feature_checks,
+            *regime_checks,
+            *strategy_checks,
+            *orchestration_checks,
+            *risk_checks,
+        ],
+    )
+    return (
+        loop,
+        runtime_context,
+        feature_emitter,
+        regime_emitter,
+        strategy_emitter,
+        orchestration_emitter,
+        risk_emitter,
+    )
+
+
 __all__ = [
     "build_feature_loop",
     "build_market_data_loop",
     "build_orchestration_loop",
     "build_regime_loop",
+    "build_risk_loop",
     "build_strategy_loop",
     "current_git_commit",
 ]

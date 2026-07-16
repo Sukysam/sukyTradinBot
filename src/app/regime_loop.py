@@ -60,9 +60,7 @@ class RegimeEmitter:
         return self._metrics
 
     def handle_frame(self, frame: RuntimeFrame) -> RuntimeFrame | None:
-        if frame.feature_vector is None:
-            raise ValueError("RuntimeFrame reached RegimeEmitter without a feature_vector")
-        vector = frame.feature_vector
+        vector = frame.require_feature_vector()
 
         self._buffer.add(vector)
         history = self._buffer.get(vector.symbol)

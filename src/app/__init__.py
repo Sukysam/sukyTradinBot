@@ -1,19 +1,20 @@
 """Runtime -- Phase A (Market Data Loop), Phase B (Feature Pipeline),
 Phase C (Regime Detection), Phase D (Strategy Engine), Phase E (Signal
-Orchestration).
+Orchestration), Phase F (Risk Management).
 
 The first pieces of the continuously-running application this platform
-has never had. Every `src/` package from `market_data` through
-`orchestration` was built and tested in isolation; nothing strung them
-into a live process until now. `app` is deliberately separate from the
-legacy `regime-trader/main.py` skeleton (which still raises
+has never had. Every `src/` package from `market_data` through `risk`
+was built and tested in isolation; nothing strung them into a live
+process until now. `app` is deliberately separate from the legacy
+`regime-trader/main.py` skeleton (which still raises
 `NotImplementedError` by design) -- see
 docs/engineering-handbook/Architecture/ADR/ADR-027-Runtime-Market-Data-Loop-Design.md,
 docs/engineering-handbook/Architecture/ADR/ADR-028-Runtime-Feature-Pipeline-Design.md,
 docs/engineering-handbook/Architecture/ADR/ADR-029-Runtime-Regime-Detection-Design.md,
 docs/engineering-handbook/Architecture/ADR/ADR-030-Runtime-Strategy-Engine-Design.md,
+docs/engineering-handbook/Architecture/ADR/ADR-031-Signal-Orchestration-Design.md,
 and
-docs/engineering-handbook/Architecture/ADR/ADR-031-Signal-Orchestration-Design.md.
+docs/engineering-handbook/Architecture/ADR/ADR-032-Runtime-Risk-Management-Design.md.
 
 Phase A: connect to Alpaca, fetch bars on an interval, normalize, log.
 Phase B: feed those bars into `FeaturePipeline`, log/emit
@@ -21,9 +22,11 @@ Phase B: feed those bars into `FeaturePipeline`, log/emit
 log/emit `RegimeState`s. Phase D: feed vector+state pairs into
 `StrategyService`, log/emit `StrategyDecision`s. Phase E: arbitrate
 `StrategyDecision` (primary) against optional advisory
-`LearningDecision`/`NewsSignal`, log/emit `FinalDecision`s. No risk, no
-execution -- those are later phases, each its own reviewed increment,
-not built speculatively ahead of need.
+`LearningDecision`/`NewsSignal`, log/emit `FinalDecision`s. Phase F:
+size/approve the arbitrated decision against live portfolio/account
+state via `RiskService`, log/emit `ExecutionDecision`s. **The runtime
+stops there** -- no broker calls, no order submission; Phase G (paper
+execution) is a separate, later, explicitly authorized decision.
 
 Every emitter's `handle_bar`/`handle_frame` takes and returns a
 `RuntimeFrame` (or `None` to stop) rather than invoking an injected
@@ -34,7 +37,9 @@ place (`app.bootstrap`), not spread across every emitter's constructor.
 - `app.frame.RuntimeFrame` -- internal runtime plumbing (not a frozen
   contract) that carries one bar's state through the pipeline, enriched
   by each phase in turn (`bar` -> `feature_vector` -> `regime_state` ->
-  `strategy_decision` -> `final_decision`).
+  `strategy_decision` -> `final_decision` -> `execution_decision`).
+  `require_*` methods centralize "does this frame have what I need
+  yet" validation in one place rather than each emitter repeating it.
 - `app.pipeline.compose_pipeline` -- folds a first-stage `handle_bar`
   and any number of `handle_frame` stages into one `on_bar`-compatible
   callable.
@@ -54,20 +59,28 @@ place (`app.bootstrap`), not spread across every emitter's constructor.
   in this runtime by design -- `memory`/`nlp` are shadow-mode-only
   (Milestones 9/10); optional `learning_decision_provider`/
   `news_signal_provider` default to `None` (no advisory input).
+- `app.risk_loop.RiskEmitter` -- enriches a frame with an
+  `ExecutionDecision`, bridging `FinalDecision` into `RiskService.
+  decide`'s `StrategyDecision`-shaped input (the specific wiring
+  Milestone 11 flagged as "not authorized by this milestone" -- now
+  authorized). `portfolio_state_provider`/`account_state_provider` are
+  required, live-data callables (no default -- this runtime has no
+  broker-query component yet).
 - `app.bootstrap.build_market_data_loop`/`build_feature_loop`/
-  `build_regime_loop`/`build_strategy_loop`/`build_orchestration_loop`
-  -- composition roots: startup validation
+  `build_regime_loop`/`build_strategy_loop`/`build_orchestration_loop`/
+  `build_risk_loop` -- composition roots: startup validation
   (`ops.startup.build_runtime_context`) then loop construction. No
   business logic. `build_regime_loop` requires an already-trained/
-  loaded `hmm.service.RegimeService`; `build_strategy_loop`/
-  `build_orchestration_loop` additionally require a `strategy.registry.
-  StrategyRegistry` -- this project has no persisted model artifact or
-  defined regime-to-strategy mapping yet, so neither has a default to
-  construct.
+  loaded `hmm.service.RegimeService`; `build_strategy_loop` onward
+  additionally requires a `strategy.registry.StrategyRegistry` -- this
+  project has no persisted model artifact or defined regime-to-strategy
+  mapping yet, so neither has a default to construct. `build_risk_loop`
+  additionally requires `portfolio_state_provider`/
+  `account_state_provider`; `risk_service` itself *does* default
+  (`RiskService.default()`), unlike the two dependencies above it.
 - `app.main` -- the process entrypoint (`python -m app`), currently
-  running the Phase B pipeline (Phase C/D/E aren't wired in as the
-  default yet -- see `build_regime_loop`/`build_strategy_loop`/
-  `build_orchestration_loop`'s docstrings).
+  running the Phase B pipeline (Phase C onward aren't wired in as the
+  default yet -- see each `build_*_loop`'s docstring).
 """
 
 from __future__ import annotations
@@ -77,6 +90,7 @@ from app.bootstrap import (
     build_market_data_loop,
     build_orchestration_loop,
     build_regime_loop,
+    build_risk_loop,
     build_strategy_loop,
     current_git_commit,
 )
@@ -87,10 +101,11 @@ from app.frame import RuntimeFrame
 from app.orchestration_loop import OrchestrationEmitter
 from app.pipeline import compose_pipeline
 from app.regime_loop import RegimeEmitter
+from app.risk_loop import RiskEmitter
 from app.runtime import MarketDataLoop
 from app.strategy_loop import StrategyEmitter
 
-__version__ = "0.5.0"
+__version__ = "0.6.0"
 
 __all__ = [
     "FeatureLoopConfig",
@@ -101,6 +116,7 @@ __all__ = [
     "OrchestrationEmitter",
     "RegimeEmitter",
     "RegimeLoopConfig",
+    "RiskEmitter",
     "RuntimeAppError",
     "RuntimeFrame",
     "StrategyEmitter",
@@ -109,6 +125,7 @@ __all__ = [
     "build_market_data_loop",
     "build_orchestration_loop",
     "build_regime_loop",
+    "build_risk_loop",
     "build_strategy_loop",
     "compose_pipeline",
     "current_git_commit",

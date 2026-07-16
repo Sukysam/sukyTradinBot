@@ -21,6 +21,89 @@ and has no entry below. See [PROJECT_STATUS.md](PROJECT_STATUS.md)'s
 "Release Milestones" section for the full grouping and what each
 umbrella tag actually points at.
 
+## Unreleased - Runtime Phase F: Risk Management (2026-07-16, no tag)
+
+Sixth of seven post-`v2.0.0` runtime phases. Wires `FinalDecision`s to
+`RiskService.decide` so the runtime sizes/approves the arbitrated
+decision against live portfolio/account state and emits an
+`ExecutionDecision` -- nothing beyond that (no broker calls, no order
+submission; the runtime remains completely paper-safe). Design and
+implementation recorded together in ADR-032, which also resolves a gap
+`orchestration/__init__.py`'s own module docstring explicitly flagged
+during Milestone 11 as "not authorized by this milestone": wiring
+`FinalDecision` into `risk.RiskService`.
+
+### Added
+- `app.risk_loop.RiskEmitter` -- `handle_frame(frame)` bridges
+  `FinalDecision` into `RiskService.decide`'s `StrategyDecision`-shaped
+  input (`_effective_strategy_decision`: `dataclasses.replace(
+  strategy_decision, allocation=final_decision.final_allocation,
+  confidence=final_decision.confidence, reasoning=final_decision
+  .rationale)`), calls `RiskService.decide(effective_decision,
+  portfolio, account)`, logs one `execution_decision_emitted` event
+  per success (symbol, timestamp, approved, approved_allocation,
+  decision_type, latency), and records `ops.metrics.MetricsRegistry`'s
+  fifth real production metrics (`execution_decisions_emitted_total`
+  counter, `execution_decision_latency_seconds` gauge,
+  `execution_decision_errors_total` counter). A failure
+  (`risk.exceptions.RiskError`) is caught and logged
+  (`execution_decision_failed`), never propagated.
+- `portfolio_state_provider`/`account_state_provider` -- required
+  constructor parameters (no default), called fresh on every
+  `handle_frame` since portfolio/account state is live and changes
+  with every trade. A provider that raises is caught, logged with a
+  specific event (`portfolio_state_provider_failed`/
+  `account_state_provider_failed`), and the frame is dropped rather
+  than proceeding with fabricated state.
+- `app.frame.RuntimeFrame` gains an `execution_decision:
+  ExecutionDecision | None` field, `with_execution_decision`, and the
+  enrichment-order invariant extended (`execution_decision` requires
+  `final_decision`).
+- `app.frame.RuntimeFrame.require_feature_vector`/
+  `require_regime_state`/`require_strategy_decision`/
+  `require_final_decision`/`require_execution_decision` -- fully typed
+  accessors (return the concrete type, not `Any`) that raise the same
+  `ValueError` shape a caller previously had to write inline.
+  `RegimeEmitter`, `StrategyEmitter`, and `OrchestrationEmitter`
+  (already merged) are retrofitted to use these instead of repeating
+  their own `if frame.x is None: raise` checks; `RiskEmitter` uses
+  them from the start.
+- `app.bootstrap.build_risk_loop` -- Phase F's composition root: the
+  full A-F pipeline composed via `compose_pipeline`. `risk_service`
+  defaults to `RiskService.default()` if not given -- a deliberate
+  contrast with `regime_service`/`strategy_registry`'s "no default"
+  reasoning, since a sensible default risk pipeline needs no trained
+  model or per-model domain mapping to be meaningful.
+- 28 new tests across `tests/app/` (`test_risk_loop.py`, plus
+  `require_*`/`execution_decision` coverage in `test_frame.py` and
+  `build_risk_loop` tests in `test_bootstrap.py`), bringing
+  `tests/app/` to 134 total (up from 106).
+
+### Changed
+- `app.__version__` bumped `0.5.0` -> `0.6.0`; `app.bootstrap.
+  __version__` likewise bumped `0.5.0` -> `0.6.0`.
+- Nothing in Phase A-E's tested public behavior changed beyond the
+  `require_*` retrofit, which preserves the exact same raised
+  `ValueError` message substrings every existing test already matched
+  against.
+
+### Known limitations
+- `app.frame`/`app.risk_loop`/`app.pipeline`/`app.orchestration_loop`/
+  `app.strategy_loop`/`app.regime_loop`/`app.features_loop`/
+  `app.buffer`/`app.config`/`app.runtime`/`app.__init__`/
+  `app.exceptions` are at 100% test coverage; `app.bootstrap` is at
+  98% (same one disclosed real-provider-construction line as Phase
+  A-E); `app.main` is at 43% (same disclosed signal-handling gap).
+- `app.main` is *not* updated to run Phase F, for the same reason
+  Phase C/D/E weren't wired in: no trained `RegimeService` or
+  deliberately-configured `StrategyRegistry` exists to default to
+  (Phase F adds no new blocker of its own -- `portfolio_state_provider`/
+  `account_state_provider` are a `python -m app` configuration
+  question for whichever phase eventually wires broker/account access
+  in, not a reason on their own).
+- Phase G (paper execution) is not yet started. No code path in this
+  runtime touches a broker or submits an order.
+
 ## Unreleased - Runtime Phase E: Signal Orchestration (2026-07-16, no tag)
 
 Fifth of seven post-`v2.0.0` runtime phases. Wires `StrategyDecision`s
