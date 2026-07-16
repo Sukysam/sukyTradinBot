@@ -16,9 +16,11 @@ from alpaca.data.enums import DataFeed
 from app.buffer import BarBuffer, FeatureVectorBuffer
 from app.config import FeatureLoopConfig, MarketDataLoopConfig, RegimeLoopConfig
 from app.exceptions import GitCommitUnavailableError
-from app.features_loop import FeatureVectorCallback, FeatureVectorEmitter
+from app.features_loop import FeatureVectorEmitter
+from app.frame import RuntimeFrameCallback
 from app.regime_loop import RegimeEmitter
 from app.runtime import BarCallback, MarketDataLoop
+from app.strategy_loop import StrategyEmitter
 from common.config import Settings
 from common.time import SystemClock
 from features.registry import DEFAULT_REGISTRY
@@ -26,18 +28,27 @@ from hmm.service import RegimeService
 from market_data.interfaces import HistoricalDataProvider
 from market_data.models import Timeframe
 from market_data.providers.alpaca_historical import AlpacaHistoricalProvider
-from ops.checks import feature_registry_check, hmm_model_check, market_data_check
+from ops.checks import (
+    feature_registry_check,
+    hmm_model_check,
+    market_data_check,
+    strategy_registry_check,
+)
 from ops.interfaces import HealthCheck
 from ops.models import RuntimeContext
 from ops.secrets import EnvSecretSource
 from ops.startup import build_runtime_context
 from ops.validation import require_valid_runtime, validate_runtime
+from strategy.config import StrategyEngineConfig
+from strategy.registry import StrategyRegistry
+from strategy.service import StrategyService
 
 _REQUIRED_SECRETS = ("ALPACA_API_KEY", "ALPACA_SECRET_KEY")
 
 # Bumped 0.1.0 -> 0.2.0 for Phase B (feature pipeline, ADR-028) -> 0.3.0
-# for Phase C (regime detection, ADR-029).
-__version__ = "0.3.0"
+# for Phase C (regime detection, ADR-029) -> 0.4.0 for Phase D (strategy
+# engine, ADR-030).
+__version__ = "0.4.0"
 
 # One day back avoids the free-tier "recent SIP data" restriction the
 # probe would otherwise hit -- see ADR-027 and
@@ -179,7 +190,7 @@ def build_feature_loop(
     *,
     feed: DataFeed = DataFeed.IEX,
     provider: HistoricalDataProvider | None = None,
-    on_feature_vector: FeatureVectorCallback | None = None,
+    on_frame: RuntimeFrameCallback | None = None,
     extra_checks: Sequence[HealthCheck] = (),
 ) -> tuple[MarketDataLoop, RuntimeContext, FeatureVectorEmitter]:
     """Phase B composition root. Builds a `FeatureVectorEmitter` first,
@@ -189,14 +200,16 @@ def build_feature_loop(
     `on_bar` and `feature_registry_check` in as an extra health check.
     No composition logic is duplicated between phases; see ADR-028.
 
-    `on_feature_vector` and `extra_checks` are how a later phase
-    extends this function without rewriting it, the same additive
-    pattern `build_market_data_loop`'s own `on_bar`/`extra_checks`
-    established for Phase B -- see `build_regime_loop` below.
+    `on_frame` and `extra_checks` are how a later phase extends this
+    function without rewriting it, the same additive pattern
+    `build_market_data_loop`'s own `on_bar`/`extra_checks` established
+    for Phase B -- see `build_regime_loop` below. `on_frame` receives
+    an `app.frame.RuntimeFrame`, not a bare `FeatureVector` -- see
+    ADR-030.
     """
     emitter = FeatureVectorEmitter(
         buffer=BarBuffer(max_bars=config.max_bars_per_symbol),
-        on_feature_vector=on_feature_vector,
+        on_frame=on_frame,
     )
     loop, runtime_context = build_market_data_loop(
         config.market_data,
@@ -214,11 +227,13 @@ def build_regime_loop(
     *,
     feed: DataFeed = DataFeed.IEX,
     provider: HistoricalDataProvider | None = None,
+    on_frame: RuntimeFrameCallback | None = None,
+    extra_checks: Sequence[HealthCheck] = (),
 ) -> tuple[MarketDataLoop, RuntimeContext, FeatureVectorEmitter, RegimeEmitter]:
     """Phase C composition root. Builds a `RegimeEmitter` first, then
     delegates every Phase A/B concern to `build_feature_loop`, wiring
-    `regime_emitter.handle_feature_vector` in as `on_feature_vector`
-    and `hmm_model_check` in as an extra health check.
+    `regime_emitter.handle_frame` in as `on_frame` and `hmm_model_check`
+    in as an extra health check.
 
     `regime_service` is a required, injected `RegimeService` -- there
     is no default construction here, unlike `provider`'s default
@@ -227,24 +242,73 @@ def build_regime_loop(
     so there is no equivalent "just needs an env var" default that
     would actually work; the caller must train or load a
     `RegimeService` itself. See ADR-029.
+
+    `on_frame` and `extra_checks` extend this function the same way
+    they extend `build_feature_loop` -- see `build_strategy_loop`
+    below.
     """
     regime_emitter = RegimeEmitter(
         regime_service,
         buffer=FeatureVectorBuffer(max_vectors=config.max_feature_vectors_per_symbol),
+        on_frame=on_frame,
     )
     loop, runtime_context, feature_emitter = build_feature_loop(
         config.feature_loop,
         feed=feed,
         provider=provider,
-        on_feature_vector=regime_emitter.handle_feature_vector,
-        extra_checks=[hmm_model_check(lambda: regime_service.n_states > 0)],
+        on_frame=regime_emitter.handle_frame,
+        extra_checks=[hmm_model_check(lambda: regime_service.n_states > 0), *extra_checks],
     )
     return loop, runtime_context, feature_emitter, regime_emitter
+
+
+def build_strategy_loop(
+    config: RegimeLoopConfig,
+    regime_service: RegimeService,
+    strategy_registry: StrategyRegistry,
+    *,
+    strategy_config: StrategyEngineConfig | None = None,
+    feed: DataFeed = DataFeed.IEX,
+    provider: HistoricalDataProvider | None = None,
+) -> tuple[MarketDataLoop, RuntimeContext, FeatureVectorEmitter, RegimeEmitter, StrategyEmitter]:
+    """Phase D composition root. Builds a `StrategyEmitter` first, then
+    delegates every Phase A/B/C concern to `build_regime_loop`, wiring
+    `strategy_emitter.handle_frame` in as `on_frame` and
+    `strategy_registry_check` in as an extra health check.
+
+    `strategy_registry` is a required, injected `StrategyRegistry` --
+    the same reasoning as `regime_service` (ADR-029): which `regime_id`s
+    map to which strategy style is inherently tied to a specific
+    trained model's regime semantics (arbitrary MAP-state indices with
+    no fixed meaning -- see `strategy.interfaces.Strategy.supports`'s
+    own docstring), which nobody has defined for any real model yet.
+    A "default" registry would either be empty (failing every dispatch)
+    or contain invented regime_id mappings that mean nothing for
+    whatever `regime_service` the caller actually supplies. Unlike
+    `RegimeService`, `StrategyService` itself is cheap to construct (no
+    training/persistence), so this function builds it internally from
+    `strategy_registry`/`strategy_config` rather than asking the caller
+    to hand over an already-built `StrategyService` -- that also keeps
+    the registry available for `strategy_registry_check`'s probe. See
+    ADR-030.
+    """
+    strategy_service = StrategyService(strategy_registry, strategy_config)
+    strategy_emitter = StrategyEmitter(strategy_service)
+    loop, runtime_context, feature_emitter, regime_emitter = build_regime_loop(
+        config,
+        regime_service,
+        feed=feed,
+        provider=provider,
+        on_frame=strategy_emitter.handle_frame,
+        extra_checks=[strategy_registry_check(lambda: len(strategy_registry.names()) > 0)],
+    )
+    return loop, runtime_context, feature_emitter, regime_emitter, strategy_emitter
 
 
 __all__ = [
     "build_feature_loop",
     "build_market_data_loop",
     "build_regime_loop",
+    "build_strategy_loop",
     "current_git_commit",
 ]
