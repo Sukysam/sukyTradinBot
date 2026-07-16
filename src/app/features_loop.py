@@ -2,12 +2,13 @@
 wired to `FeaturePipeline`. See
 docs/engineering-handbook/Architecture/ADR/ADR-028-Runtime-Feature-Pipeline-Design.md
 and
-docs/engineering-handbook/Architecture/ADR/ADR-030-Runtime-Strategy-Engine-Design.md.
+docs/engineering-handbook/Architecture/ADR/ADR-031-Signal-Orchestration-Design.md.
 
 `handle_bar` is the whole surface: append the bar to a bounded
 per-symbol `BarBuffer`, call `FeaturePipeline.compute(strict=False)` on
 whatever history exists so far, log one structured event per computed
-`FeatureVector`, and record it on an `ops.metrics.MetricsRegistry`. A
+`FeatureVector`, record it on an `ops.metrics.MetricsRegistry`, and
+return a `RuntimeFrame` carrying both -- or `None` on failure. A
 computation failure is caught and logged, never propagated -- one bad
 tick's feature computation must not stop the market-data loop that fed
 it, matching `MarketDataLoop`'s own fetch-failure-isolation convention.
@@ -19,7 +20,7 @@ import logging
 import time
 
 from app.buffer import BarBuffer
-from app.frame import RuntimeFrame, RuntimeFrameCallback
+from app.frame import RuntimeFrame
 from features.errors import FeatureError
 from features.pipeline import PIPELINE_VERSION, FeaturePipeline
 from market_data.models import Bar
@@ -34,16 +35,9 @@ DEFAULT_MAX_BARS = 200
 
 
 class FeatureVectorEmitter:
-    """`on_frame`, if given, is this class's own extension point for the
-    next phase -- the same "each phase exposes one clean hook for the
-    next" shape as `MarketDataLoop.on_bar`. Carries a `RuntimeFrame`
-    (built here as `RuntimeFrame(bar=bar, feature_vector=vector)`),
-    not a bare `FeatureVector`, so a later phase (e.g. Phase D's
-    `StrategyEmitter`, which needs both a `FeatureVector` and the
-    `RegimeState` derived from it) never has to reconstruct state an
-    earlier phase already computed -- see ADR-030. A callback failure
-    is caught and logged, never propagated, for the same reason
-    `MarketDataLoop`'s own `on_bar` dispatch is.
+    """Turns bars into `RuntimeFrame`s carrying a `FeatureVector`. Holds
+    no "next stage" hook -- see `app.pipeline.compose_pipeline` for how
+    this is wired to whatever comes after it.
     """
 
     def __init__(
@@ -52,18 +46,16 @@ class FeatureVectorEmitter:
         buffer: BarBuffer | None = None,
         pipeline: FeaturePipeline | None = None,
         metrics: MetricsRegistry | None = None,
-        on_frame: RuntimeFrameCallback | None = None,
     ) -> None:
         self._buffer = buffer or BarBuffer(max_bars=DEFAULT_MAX_BARS)
         self._pipeline = pipeline or FeaturePipeline()
         self._metrics = metrics or MetricsRegistry()
-        self._on_frame = on_frame
 
     @property
     def metrics(self) -> MetricsRegistry:
         return self._metrics
 
-    def handle_bar(self, bar: Bar) -> None:
+    def handle_bar(self, bar: Bar) -> RuntimeFrame | None:
         self._buffer.add(bar)
         bars = self._buffer.get(bar.symbol)
 
@@ -83,7 +75,7 @@ class FeatureVectorEmitter:
                     "error": str(exc),
                 },
             )
-            return
+            return None
         latency_seconds = time.perf_counter() - started_at
 
         self._metrics.counter(
@@ -107,19 +99,7 @@ class FeatureVectorEmitter:
             },
         )
 
-        if self._on_frame is not None:
-            frame = RuntimeFrame(bar=bar, feature_vector=vector)
-            try:
-                self._on_frame(frame)
-            except Exception as exc:
-                logger.warning(
-                    "on_frame callback failed",
-                    extra={
-                        "event": "on_frame_callback_failed",
-                        "symbol": vector.symbol,
-                        "error": str(exc),
-                    },
-                )
+        return RuntimeFrame(bar=bar, feature_vector=vector)
 
 
 __all__ = ["DEFAULT_MAX_BARS", "FeatureVectorEmitter"]

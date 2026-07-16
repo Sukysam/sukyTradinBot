@@ -1,15 +1,18 @@
-"""`StrategyEmitter` -- Phase D: `RegimeEmitter`'s `on_frame` hook wired
-to `StrategyService`. See
-docs/engineering-handbook/Architecture/ADR/ADR-030-Runtime-Strategy-Engine-Design.md.
+"""`StrategyEmitter` -- Phase D: the stage after `RegimeEmitter` in the
+composed pipeline, wired to `StrategyService`. See
+docs/engineering-handbook/Architecture/ADR/ADR-030-Runtime-Strategy-Engine-Design.md
+and
+docs/engineering-handbook/Architecture/ADR/ADR-031-Signal-Orchestration-Design.md.
 
 `handle_frame` is the whole surface: call `StrategyService.decide` with
 `frame.feature_vector`/`frame.regime_state` (both already present on
 the frame by the time it reaches this class -- `RuntimeFrame`'s own
 enrichment-order invariant guarantees it), log one structured event
-per computed `StrategyDecision`, and record it on an `ops.metrics.
-MetricsRegistry`. A failure is caught and logged, never propagated,
-matching `RegimeEmitter`'s own failure-isolation convention. No buffer
-here -- unlike `FeaturePipeline.compute`/`RegimeService.infer`,
+per computed `StrategyDecision`, record it on an `ops.metrics.
+MetricsRegistry`, and return the enriched frame -- or `None` on
+failure. A failure is caught and logged, never propagated, matching
+`RegimeEmitter`'s own failure-isolation convention. No buffer here --
+unlike `FeaturePipeline.compute`/`RegimeService.infer`,
 `StrategyService.decide` needs only the current `(FeatureVector,
 RegimeState)` pair, no rolling history.
 """
@@ -19,7 +22,7 @@ from __future__ import annotations
 import logging
 import time
 
-from app.frame import RuntimeFrame, RuntimeFrameCallback
+from app.frame import RuntimeFrame
 from ops.metrics import MetricsRegistry
 from strategy.exceptions import StrategyError
 from strategy.service import StrategyService
@@ -28,12 +31,9 @@ logger = logging.getLogger(__name__)
 
 
 class StrategyEmitter:
-    """Wraps exactly one `StrategyService`. `on_frame`, if given, is
-    this class's own extension point for the next phase (Phase E:
-    signal orchestration) -- the same "each phase exposes one clean
-    hook for the next" shape every earlier emitter in `app` already
-    established. Its failures are caught and logged, never propagated,
-    for the same containment reason.
+    """Wraps exactly one `StrategyService`. Holds no "next stage" hook
+    -- see `app.pipeline.compose_pipeline` for how this is wired to
+    whatever comes after it.
     """
 
     def __init__(
@@ -41,17 +41,15 @@ class StrategyEmitter:
         strategy_service: StrategyService,
         *,
         metrics: MetricsRegistry | None = None,
-        on_frame: RuntimeFrameCallback | None = None,
     ) -> None:
         self._service = strategy_service
         self._metrics = metrics or MetricsRegistry()
-        self._on_frame = on_frame
 
     @property
     def metrics(self) -> MetricsRegistry:
         return self._metrics
 
-    def handle_frame(self, frame: RuntimeFrame) -> None:
+    def handle_frame(self, frame: RuntimeFrame) -> RuntimeFrame | None:
         if frame.feature_vector is None or frame.regime_state is None:
             raise ValueError(
                 "RuntimeFrame reached StrategyEmitter without a feature_vector/regime_state"
@@ -74,7 +72,7 @@ class StrategyEmitter:
                     "error": str(exc),
                 },
             )
-            return
+            return None
         latency_seconds = time.perf_counter() - started_at
 
         self._metrics.counter(
@@ -100,19 +98,7 @@ class StrategyEmitter:
             },
         )
 
-        if self._on_frame is not None:
-            enriched = frame.with_strategy_decision(decision)
-            try:
-                self._on_frame(enriched)
-            except Exception as exc:
-                logger.warning(
-                    "on_frame callback failed",
-                    extra={
-                        "event": "on_frame_callback_failed",
-                        "symbol": decision.symbol,
-                        "error": str(exc),
-                    },
-                )
+        return frame.with_strategy_decision(decision)
 
 
 __all__ = ["StrategyEmitter"]

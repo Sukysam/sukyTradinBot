@@ -97,34 +97,17 @@ class TestRegimeEmitter:
         assert emitter.metrics.counter("regime_states_emitted_total").value == 1.0
         assert emitter.metrics.gauge("regime_inference_latency_seconds").value >= 0.0
 
-    def test_on_frame_callback_is_called_with_a_frame_carrying_the_regime_state(self) -> None:
-        received: list[RuntimeFrame] = []
-        emitter = RegimeEmitter(_trained_service(), on_frame=received.append)
+    def test_handle_frame_returns_a_frame_carrying_the_regime_state(self) -> None:
+        emitter = RegimeEmitter(_trained_service())
 
-        emitter.handle_frame(_live_frame())
+        frame = emitter.handle_frame(_live_frame())
 
-        assert len(received) == 1
-        assert received[0].regime_state is not None
-        assert received[0].regime_state.symbol == SYMBOL
-        assert received[0].feature_vector is not None
+        assert frame is not None
+        assert frame.regime_state is not None
+        assert frame.regime_state.symbol == SYMBOL
+        assert frame.feature_vector is not None
 
-    def test_on_frame_callback_failure_is_logged_and_does_not_raise(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        def _boom(_frame: RuntimeFrame) -> None:
-            raise RuntimeError("simulated callback failure")
-
-        emitter = RegimeEmitter(_trained_service(), on_frame=_boom)
-
-        with caplog.at_level(logging.WARNING, logger="app.regime_loop"):
-            emitter.handle_frame(_live_frame())  # must not raise
-
-        failures = [
-            r for r in caplog.records if getattr(r, "event", None) == "on_frame_callback_failed"
-        ]
-        assert len(failures) == 1
-
-    def test_inference_failure_is_logged_and_does_not_raise(
+    def test_inference_failure_is_logged_and_returns_none(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
         emitter = RegimeEmitter(
@@ -133,8 +116,9 @@ class TestRegimeEmitter:
         )
 
         with caplog.at_level(logging.WARNING, logger="app.regime_loop"):
-            emitter.handle_frame(_live_frame())  # must not raise
+            frame = emitter.handle_frame(_live_frame())  # must not raise
 
+        assert frame is None
         failures = [
             r for r in caplog.records if getattr(r, "event", None) == "regime_inference_failed"
         ]
