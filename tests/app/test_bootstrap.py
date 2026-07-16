@@ -12,13 +12,20 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.bootstrap import build_feature_loop, build_market_data_loop, current_git_commit
-from app.config import FeatureLoopConfig, MarketDataLoopConfig
+from app.bootstrap import (
+    build_feature_loop,
+    build_market_data_loop,
+    build_regime_loop,
+    current_git_commit,
+)
+from app.config import FeatureLoopConfig, MarketDataLoopConfig, RegimeLoopConfig
 from app.exceptions import GitCommitUnavailableError
 from app.features_loop import FeatureVectorEmitter
+from app.regime_loop import RegimeEmitter
 from app.runtime import MarketDataLoop
 from market_data.errors import ProviderConnectionError
 from market_data.models import Bar, Timeframe
+from ops.checks import CallableHealthCheck
 from ops.exceptions import RuntimeValidationError, UnhealthyPlatformError
 from ops.models import RuntimeContext
 
@@ -88,7 +95,7 @@ class TestBuildMarketDataLoop:
         loop, runtime_context = build_market_data_loop(_config(), provider=_FakeProvider())
         assert isinstance(loop, MarketDataLoop)
         assert isinstance(runtime_context, RuntimeContext)
-        assert runtime_context.platform_info.version == "0.2.0"
+        assert runtime_context.platform_info.version == "0.3.0"
 
     def test_raises_runtime_validation_error_when_secret_missing(
         self, monkeypatch: pytest.MonkeyPatch
@@ -120,7 +127,7 @@ class TestBuildFeatureLoop:
         assert isinstance(loop, MarketDataLoop)
         assert isinstance(runtime_context, RuntimeContext)
         assert isinstance(emitter, FeatureVectorEmitter)
-        assert runtime_context.platform_info.version == "0.2.0"
+        assert runtime_context.platform_info.version == "0.3.0"
 
     def test_wires_the_emitter_as_the_loops_on_bar_callback(self) -> None:
         loop, _, emitter = build_feature_loop(_feature_config(), provider=_FakeProvider())
@@ -141,3 +148,77 @@ class TestBuildFeatureLoop:
     def test_raises_unhealthy_platform_error_when_connectivity_check_fails(self) -> None:
         with pytest.raises(UnhealthyPlatformError):
             build_feature_loop(_feature_config(), provider=_FakeProvider(healthy=False))
+
+    def test_on_feature_vector_is_passed_through_to_the_emitter(self) -> None:
+        received: list[object] = []
+        callback = received.append
+        _, _, emitter = build_feature_loop(
+            _feature_config(), provider=_FakeProvider(), on_feature_vector=callback
+        )
+        assert emitter._on_feature_vector is callback
+
+    def test_extra_checks_are_included_in_the_health_gate(self) -> None:
+        failing_check = CallableHealthCheck("always_fails", lambda: False)
+        with pytest.raises(UnhealthyPlatformError):
+            build_feature_loop(
+                _feature_config(), provider=_FakeProvider(), extra_checks=[failing_check]
+            )
+
+
+class _FakeRegimeService:
+    def __init__(self, n_states: int = 3) -> None:
+        self.n_states = n_states
+
+
+def _regime_config() -> RegimeLoopConfig:
+    return RegimeLoopConfig(feature_loop=_feature_config())
+
+
+class TestBuildRegimeLoop:
+    def test_builds_loop_context_and_both_emitters_when_healthy(self) -> None:
+        loop, runtime_context, feature_emitter, regime_emitter = build_regime_loop(
+            _regime_config(), _FakeRegimeService(), provider=_FakeProvider()  # type: ignore[arg-type]
+        )
+        assert isinstance(loop, MarketDataLoop)
+        assert isinstance(runtime_context, RuntimeContext)
+        assert isinstance(feature_emitter, FeatureVectorEmitter)
+        assert isinstance(regime_emitter, RegimeEmitter)
+        assert runtime_context.platform_info.version == "0.3.0"
+
+    def test_wires_the_regime_emitter_as_the_feature_emitters_on_feature_vector_callback(
+        self,
+    ) -> None:
+        _, _, feature_emitter, regime_emitter = build_regime_loop(
+            _regime_config(), _FakeRegimeService(), provider=_FakeProvider()  # type: ignore[arg-type]
+        )
+        assert feature_emitter._on_feature_vector == regime_emitter.handle_feature_vector
+
+    def test_regime_emitter_metrics_start_empty(self) -> None:
+        _, _, _, regime_emitter = build_regime_loop(
+            _regime_config(), _FakeRegimeService(), provider=_FakeProvider()  # type: ignore[arg-type]
+        )
+        assert regime_emitter.metrics.counters == ()
+        assert regime_emitter.metrics.gauges == ()
+
+    def test_raises_runtime_validation_error_when_secret_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("ALPACA_API_KEY", raising=False)
+        with pytest.raises(RuntimeValidationError):
+            build_regime_loop(
+                _regime_config(), _FakeRegimeService(), provider=_FakeProvider()  # type: ignore[arg-type]
+            )
+
+    def test_raises_unhealthy_platform_error_when_connectivity_check_fails(self) -> None:
+        with pytest.raises(UnhealthyPlatformError):
+            build_regime_loop(
+                _regime_config(),
+                _FakeRegimeService(),  # type: ignore[arg-type]
+                provider=_FakeProvider(healthy=False),
+            )
+
+    def test_raises_unhealthy_platform_error_when_regime_service_has_no_states(self) -> None:
+        with pytest.raises(UnhealthyPlatformError):
+            build_regime_loop(
+                _regime_config(), _FakeRegimeService(n_states=0), provider=_FakeProvider()  # type: ignore[arg-type]
+            )
