@@ -21,6 +21,78 @@ and has no entry below. See [PROJECT_STATUS.md](PROJECT_STATUS.md)'s
 "Release Milestones" section for the full grouping and what each
 umbrella tag actually points at.
 
+## Unreleased - Runtime Phase D: Strategy Engine (2026-07-16, no tag)
+
+Fourth of seven post-`v2.0.0` runtime phases. Wires `RegimeState`s to
+`strategy.service.StrategyService` so the runtime dispatches a regime
+call to a registered strategy and emits a `StrategyDecision` --
+nothing beyond that (no risk, no execution, no signal orchestration).
+Design and implementation recorded together in ADR-030, which also
+introduces `app.frame.RuntimeFrame` -- internal plumbing (not a frozen
+contract) that carries `bar -> feature_vector -> regime_state ->
+strategy_decision` through the pipeline, replacing the earlier
+per-phase callback payloads because `StrategyService.decide` needs a
+`FeatureVector` and its derived `RegimeState` together, which the
+prior wiring had no way to carry.
+
+### Added
+- `app.frame.RuntimeFrame` -- a frozen dataclass enriched strictly in
+  order by each emitter (`with_feature_vector`/`with_regime_state`/
+  `with_strategy_decision`, each returning a new frame). `__post_init__`
+  enforces enrichment order as an invariant.
+- `app.strategy_loop.StrategyEmitter` -- `handle_frame(frame)` calls
+  `StrategyService.decide(frame.feature_vector, frame.regime_state)`
+  (raising `ValueError` if either is missing -- an `app`-internal
+  wiring bug), logs one `strategy_decision_emitted` event per success
+  (symbol, timestamp, strategy_id, regime_id, allocation, confidence,
+  latency), and records `ops.metrics.MetricsRegistry`'s third real
+  production metrics (`strategy_decisions_emitted_total` counter,
+  `strategy_decision_latency_seconds` gauge,
+  `strategy_decision_errors_total` counter). A failure
+  (`strategy.exceptions.StrategyError`) is caught and logged
+  (`strategy_decision_failed`), never propagated. Holds no buffer --
+  `decide` needs no rolling history. Exposes an optional `on_frame`
+  hook for the next phase (Phase E: signal orchestration).
+- `app.bootstrap.build_strategy_loop` -- Phase D's composition root:
+  builds a `StrategyEmitter`, then delegates to `build_regime_loop`
+  with `on_frame=strategy_emitter.handle_frame` and
+  `extra_checks=[strategy_registry_check(...)]`. Returns `(loop,
+  runtime_context, feature_emitter, regime_emitter, strategy_emitter)`.
+  **`strategy_registry: StrategyRegistry` is a required, injected
+  parameter alongside `regime_service` -- no default, since which
+  `regime_id`s map to which strategy style is inherently tied to a
+  specific trained model's regime semantics nobody has defined yet.**
+  `StrategyService` itself is built internally from the injected
+  registry (cheap -- no training/persistence, unlike `RegimeService`).
+- 21 new tests across `tests/app/` (`test_frame.py`,
+  `test_strategy_loop.py`, plus additions to `test_bootstrap.py`),
+  bringing `tests/app/` to 88 total (up from 67).
+
+### Changed
+- **Breaking change to Phase B/C's internal-only hooks** (never part
+  of any frozen contract): `FeatureVectorEmitter.on_feature_vector` ->
+  `on_frame` (now takes a `RuntimeFrame`, not a bare `FeatureVector`);
+  `RegimeEmitter.handle_feature_vector`/`on_regime_state` ->
+  `handle_frame`/`on_frame`. `build_feature_loop`'s `on_feature_vector`
+  parameter renamed to `on_frame`; `build_regime_loop` gained the same
+  additive `on_frame`/`extra_checks` parameters `build_feature_loop`
+  already had.
+- `app.__version__` bumped `0.3.0` -> `0.4.0`; `app.bootstrap.
+  __version__` likewise bumped `0.3.0` -> `0.4.0`.
+
+### Known limitations
+- `app.frame`/`app.strategy_loop`/`app.buffer`/`app.regime_loop`/
+  `app.features_loop`/`app.config`/`app.runtime`/`app.__init__`/
+  `app.exceptions` are at 100% test coverage; `app.bootstrap` is at
+  97% (same one disclosed real-provider-construction line as Phase
+  A/B/C); `app.main` is at 43% (same disclosed signal-handling gap).
+- **`app.main` is *not* updated to run Phase D**, for the same reason
+  Phase C wasn't wired in (ADR-029): it would require a real, trained
+  `RegimeService` *and* a real, deliberately-configured
+  `StrategyRegistry` at process startup, neither of which exists yet.
+- Phases E through G (signal orchestration, risk, paper execution) are
+  not yet started.
+
 ## Unreleased - Runtime Phase C: Regime Detection (2026-07-16, no tag)
 
 Third of seven post-`v2.0.0` runtime phases. Wires `FeatureVector`s to

@@ -18,6 +18,7 @@ import pytest
 
 from app.buffer import BarBuffer
 from app.features_loop import FeatureVectorEmitter
+from app.frame import RuntimeFrame
 from features.errors import FeatureComputationError
 from features.feature_vector import FeatureVector
 from features.pipeline import PIPELINE_VERSION
@@ -81,30 +82,32 @@ class TestFeatureVectorEmitter:
         assert emitter.metrics.counter("feature_vectors_emitted_total").value == 1.0
         assert emitter.metrics.gauge("feature_pipeline_latency_seconds").value >= 0.0
 
-    def test_on_feature_vector_callback_is_called_with_the_computed_vector(self) -> None:
-        received: list[FeatureVector] = []
-        emitter = FeatureVectorEmitter(on_feature_vector=received.append)
+    def test_on_frame_callback_is_called_with_a_frame_carrying_the_bar_and_vector(self) -> None:
+        received: list[RuntimeFrame] = []
+        bar = _bar()
+        emitter = FeatureVectorEmitter(on_frame=received.append)
 
-        emitter.handle_bar(_bar())
+        emitter.handle_bar(bar)
 
         assert len(received) == 1
-        assert received[0].symbol == "AAPL"
+        assert received[0].bar == bar
+        assert received[0].feature_vector is not None
+        assert received[0].feature_vector.symbol == "AAPL"
+        assert received[0].regime_state is None
 
-    def test_on_feature_vector_callback_failure_is_logged_and_does_not_raise(
+    def test_on_frame_callback_failure_is_logged_and_does_not_raise(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        def _boom(_vector: FeatureVector) -> None:
+        def _boom(_frame: RuntimeFrame) -> None:
             raise RuntimeError("simulated callback failure")
 
-        emitter = FeatureVectorEmitter(on_feature_vector=_boom)
+        emitter = FeatureVectorEmitter(on_frame=_boom)
 
         with caplog.at_level(logging.WARNING, logger="app.features_loop"):
             emitter.handle_bar(_bar())  # must not raise
 
         failures = [
-            r
-            for r in caplog.records
-            if getattr(r, "event", None) == "on_feature_vector_callback_failed"
+            r for r in caplog.records if getattr(r, "event", None) == "on_frame_callback_failed"
         ]
         assert len(failures) == 1
 

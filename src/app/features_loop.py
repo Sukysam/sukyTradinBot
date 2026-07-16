@@ -1,6 +1,8 @@
 """`FeatureVectorEmitter` -- Phase B: `MarketDataLoop`'s `on_bar` hook
 wired to `FeaturePipeline`. See
-docs/engineering-handbook/Architecture/ADR/ADR-028-Runtime-Feature-Pipeline-Design.md.
+docs/engineering-handbook/Architecture/ADR/ADR-028-Runtime-Feature-Pipeline-Design.md
+and
+docs/engineering-handbook/Architecture/ADR/ADR-030-Runtime-Strategy-Engine-Design.md.
 
 `handle_bar` is the whole surface: append the bar to a bounded
 per-symbol `BarBuffer`, call `FeaturePipeline.compute(strict=False)` on
@@ -15,18 +17,15 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Callable
 
 from app.buffer import BarBuffer
+from app.frame import RuntimeFrame, RuntimeFrameCallback
 from features.errors import FeatureError
-from features.feature_vector import FeatureVector
 from features.pipeline import PIPELINE_VERSION, FeaturePipeline
 from market_data.models import Bar
 from ops.metrics import MetricsRegistry
 
 logger = logging.getLogger(__name__)
-
-FeatureVectorCallback = Callable[[FeatureVector], None]
 
 # Comfortably above the largest registered feature lookback (100 bars,
 # in features/statistical.py) so no feature is permanently starved of
@@ -35,12 +34,16 @@ DEFAULT_MAX_BARS = 200
 
 
 class FeatureVectorEmitter:
-    """`on_feature_vector`, if given, is this class's own extension
-    point for the next phase (Phase C: regime inference) -- the same
-    "each phase exposes one clean hook for the next" shape as
-    `MarketDataLoop.on_bar`. A callback failure is caught and logged,
-    never propagated, for the same reason `MarketDataLoop`'s own
-    `on_bar` dispatch is.
+    """`on_frame`, if given, is this class's own extension point for the
+    next phase -- the same "each phase exposes one clean hook for the
+    next" shape as `MarketDataLoop.on_bar`. Carries a `RuntimeFrame`
+    (built here as `RuntimeFrame(bar=bar, feature_vector=vector)`),
+    not a bare `FeatureVector`, so a later phase (e.g. Phase D's
+    `StrategyEmitter`, which needs both a `FeatureVector` and the
+    `RegimeState` derived from it) never has to reconstruct state an
+    earlier phase already computed -- see ADR-030. A callback failure
+    is caught and logged, never propagated, for the same reason
+    `MarketDataLoop`'s own `on_bar` dispatch is.
     """
 
     def __init__(
@@ -49,12 +52,12 @@ class FeatureVectorEmitter:
         buffer: BarBuffer | None = None,
         pipeline: FeaturePipeline | None = None,
         metrics: MetricsRegistry | None = None,
-        on_feature_vector: FeatureVectorCallback | None = None,
+        on_frame: RuntimeFrameCallback | None = None,
     ) -> None:
         self._buffer = buffer or BarBuffer(max_bars=DEFAULT_MAX_BARS)
         self._pipeline = pipeline or FeaturePipeline()
         self._metrics = metrics or MetricsRegistry()
-        self._on_feature_vector = on_feature_vector
+        self._on_frame = on_frame
 
     @property
     def metrics(self) -> MetricsRegistry:
@@ -104,18 +107,19 @@ class FeatureVectorEmitter:
             },
         )
 
-        if self._on_feature_vector is not None:
+        if self._on_frame is not None:
+            frame = RuntimeFrame(bar=bar, feature_vector=vector)
             try:
-                self._on_feature_vector(vector)
+                self._on_frame(frame)
             except Exception as exc:
                 logger.warning(
-                    "on_feature_vector callback failed",
+                    "on_frame callback failed",
                     extra={
-                        "event": "on_feature_vector_callback_failed",
+                        "event": "on_frame_callback_failed",
                         "symbol": vector.symbol,
                         "error": str(exc),
                     },
                 )
 
 
-__all__ = ["DEFAULT_MAX_BARS", "FeatureVectorCallback", "FeatureVectorEmitter"]
+__all__ = ["DEFAULT_MAX_BARS", "FeatureVectorEmitter"]
