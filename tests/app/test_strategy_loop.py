@@ -121,41 +121,25 @@ class TestStrategyEmitter:
         assert emitter.metrics.counter("strategy_decisions_emitted_total").value == 1.0
         assert emitter.metrics.gauge("strategy_decision_latency_seconds").value >= 0.0
 
-    def test_on_frame_callback_is_called_with_a_frame_carrying_the_decision(self) -> None:
-        received: list[RuntimeFrame] = []
-        emitter = StrategyEmitter(_real_service(), on_frame=received.append)
+    def test_handle_frame_returns_a_frame_carrying_the_decision(self) -> None:
+        emitter = StrategyEmitter(_real_service())
 
-        emitter.handle_frame(_frame())
+        frame = emitter.handle_frame(_frame())
 
-        assert len(received) == 1
-        assert received[0].strategy_decision is not None
-        assert received[0].strategy_decision.strategy_id == "growth"
-        assert received[0].regime_state is not None
+        assert frame is not None
+        assert frame.strategy_decision is not None
+        assert frame.strategy_decision.strategy_id == "growth"
+        assert frame.regime_state is not None
 
-    def test_on_frame_callback_failure_is_logged_and_does_not_raise(
-        self, caplog: pytest.LogCaptureFixture
-    ) -> None:
-        def _boom(_frame: RuntimeFrame) -> None:
-            raise RuntimeError("simulated callback failure")
-
-        emitter = StrategyEmitter(_real_service(), on_frame=_boom)
-
-        with caplog.at_level(logging.WARNING, logger="app.strategy_loop"):
-            emitter.handle_frame(_frame())  # must not raise
-
-        failures = [
-            r for r in caplog.records if getattr(r, "event", None) == "on_frame_callback_failed"
-        ]
-        assert len(failures) == 1
-
-    def test_decision_failure_is_logged_and_does_not_raise(
+    def test_decision_failure_is_logged_and_returns_none(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
         emitter = StrategyEmitter(_RaisingService())  # type: ignore[arg-type]
 
         with caplog.at_level(logging.WARNING, logger="app.strategy_loop"):
-            emitter.handle_frame(_frame())  # must not raise
+            frame = emitter.handle_frame(_frame())  # must not raise
 
+        assert frame is None
         failures = [
             r for r in caplog.records if getattr(r, "event", None) == "strategy_decision_failed"
         ]

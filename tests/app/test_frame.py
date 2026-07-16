@@ -11,6 +11,7 @@ from app.frame import RuntimeFrame
 from features.feature_vector import FeatureVector, Provenance
 from hmm.models import RegimeState
 from market_data.models import Bar, Timeframe
+from orchestration.models import ArbitrationOutcome, FinalDecision, SignalInput
 from strategy.models import StrategyDecision
 
 UTC = timezone.utc
@@ -75,6 +76,24 @@ def _strategy_decision() -> StrategyDecision:
     )
 
 
+def _final_decision() -> FinalDecision:
+    absent = SignalInput(source="memory", considered=False, agrees=False, weight=0.0)
+    return FinalDecision(
+        timestamp=T0,
+        symbol="AAPL",
+        strategy_id="growth",
+        regime_id=0,
+        primary_allocation=0.5,
+        final_allocation=0.5,
+        confidence=0.8,
+        outcome=ArbitrationOutcome.CONFIRMED,
+        learner_input=absent,
+        news_input=SignalInput(source="nlp", considered=False, agrees=False, weight=0.0),
+        rationale="test",
+        metadata={},
+    )
+
+
 class TestRuntimeFrame:
     def test_bar_only_frame_constructs(self) -> None:
         frame = RuntimeFrame(bar=_bar())
@@ -90,6 +109,15 @@ class TestRuntimeFrame:
         with pytest.raises(ValueError, match="regime_state"):
             RuntimeFrame(
                 bar=_bar(), feature_vector=_feature_vector(), strategy_decision=_strategy_decision()
+            )
+
+    def test_rejects_final_decision_without_strategy_decision(self) -> None:
+        with pytest.raises(ValueError, match="strategy_decision"):
+            RuntimeFrame(
+                bar=_bar(),
+                feature_vector=_feature_vector(),
+                regime_state=_regime_state(),
+                final_decision=_final_decision(),
             )
 
     def test_with_feature_vector_enriches_without_mutating_original(self) -> None:
@@ -120,3 +148,17 @@ class TestRuntimeFrame:
         assert frame.strategy_decision is None
         assert enriched.strategy_decision is decision
         assert enriched.regime_state == frame.regime_state
+
+    def test_with_final_decision_enriches_without_mutating_original(self) -> None:
+        frame = RuntimeFrame(
+            bar=_bar(),
+            feature_vector=_feature_vector(),
+            regime_state=_regime_state(),
+            strategy_decision=_strategy_decision(),
+        )
+        decision = _final_decision()
+        enriched = frame.with_final_decision(decision)
+
+        assert frame.final_decision is None
+        assert enriched.final_decision is decision
+        assert enriched.strategy_decision == frame.strategy_decision

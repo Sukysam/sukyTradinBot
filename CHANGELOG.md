@@ -21,6 +21,84 @@ and has no entry below. See [PROJECT_STATUS.md](PROJECT_STATUS.md)'s
 "Release Milestones" section for the full grouping and what each
 umbrella tag actually points at.
 
+## Unreleased - Runtime Phase E: Signal Orchestration (2026-07-16, no tag)
+
+Fifth of seven post-`v2.0.0` runtime phases. Wires `StrategyDecision`s
+to `orchestration.arbitration.arbitrate` so the runtime arbitrates the
+primary strategy call against optional advisory `LearningDecision`/
+`NewsSignal` input and emits a `FinalDecision` -- nothing beyond that
+(no risk, no execution). Design and implementation recorded together
+in ADR-031, which also applies an architectural correction to every
+emitter built since Phase B: the `on_frame`/`on_feature_vector`/
+`on_regime_state` callback parameter is removed entirely, in favor of
+each `handle_bar`/`handle_frame` returning the enriched `RuntimeFrame`
+(or `None` to stop) directly.
+
+### Added
+- `app.orchestration_loop.OrchestrationEmitter` -- `handle_frame(frame)`
+  calls `arbitrate(frame.strategy_decision, learning_decision,
+  news_signal, config=..., policy=...)` (default policy:
+  `SafetyFirstPolicy`), logs one `final_decision_emitted` event per
+  success (symbol, timestamp, outcome, primary_allocation,
+  final_allocation, confidence, latency), and records `ops.metrics
+  .MetricsRegistry`'s fourth real production metrics
+  (`final_decisions_emitted_total` counter, `final_decision_latency_
+  seconds` gauge, `final_decision_errors_total` counter). A failure
+  (`orchestration.exceptions.OrchestrationError`) is caught and logged
+  (`final_decision_failed`), never propagated. Optional
+  `learning_decision_provider`/`news_signal_provider` default to
+  `None` -- there is deliberately no `MemoryEmitter`/`NlpEmitter`
+  pipeline stage; `memory`/`nlp` remain shadow-mode-only (Milestones
+  9/10), and `arbitrate` already treats a missing advisory signal as
+  the ordinary case. A provider that raises is caught and treated as
+  "no advisory input", never blocking the primary decision.
+- `app.frame.RuntimeFrame` gains a `final_decision: FinalDecision |
+  None` field and `with_final_decision`, with the same enrichment-order
+  invariant extended (`final_decision` requires `strategy_decision`).
+- `app.pipeline.compose_pipeline(handle_bar, *stages) -> BarCallback`
+  -- folds a first-stage `handle_bar` and any number of `handle_frame`
+  stages into one `on_bar`-compatible callable, short-circuiting the
+  moment any stage returns `None`. `MarketDataLoop.on_bar` itself is
+  unaffected; the composed callable satisfies its `Callable[[Bar],
+  None]` type by discarding whatever the final stage returns.
+- `app.bootstrap.build_orchestration_loop` -- Phase E's composition
+  root: the full A-E pipeline composed via `compose_pipeline`. Reuses
+  `regime_service`/`strategy_registry` injection exactly as Phase D
+  required them (no new gap introduced).
+- 21 new tests across `tests/app/` (`test_pipeline.py`,
+  `test_orchestration_loop.py`, plus rewritten wiring tests in
+  `test_features_loop.py`/`test_regime_loop.py`/`test_strategy_loop.py`/
+  `test_bootstrap.py`/`test_frame.py`), bringing `tests/app/` to 106
+  total (up from 88).
+
+### Changed
+- **Breaking change to every emitter's internal-only hooks** (never
+  part of any frozen contract): `FeatureVectorEmitter`/`RegimeEmitter`/
+  `StrategyEmitter` all lose their `on_frame` constructor parameter;
+  `handle_bar`/`handle_frame` now return `RuntimeFrame | None` instead
+  of invoking a callback. `app.bootstrap` correspondingly moved from
+  nested delegation (each phase injecting a callback into the previous
+  phase's builder) to flat composition: `_build_feature_stage`/
+  `_build_regime_stage`/`_build_strategy_stage` helpers each return
+  `(emitter, health_checks)`; every `build_*_loop` composes its own
+  full stage list directly against `build_market_data_loop` via
+  `compose_pipeline`, since `MarketDataLoop.on_bar` has no public
+  setter and can't be extended after construction.
+- `app.__version__` bumped `0.4.0` -> `0.5.0`; `app.bootstrap.
+  __version__` likewise bumped `0.4.0` -> `0.5.0`.
+
+### Known limitations
+- `app.frame`/`app.pipeline`/`app.orchestration_loop`/
+  `app.strategy_loop`/`app.buffer`/`app.regime_loop`/
+  `app.features_loop`/`app.config`/`app.runtime`/`app.__init__`/
+  `app.exceptions` are at 100% test coverage; `app.bootstrap` is at
+  98% (same one disclosed real-provider-construction line as Phase
+  A-D); `app.main` is at 43% (same disclosed signal-handling gap).
+- `app.main` is *not* updated to run Phase E, for the same reason
+  Phase C/D weren't wired in: no trained `RegimeService` or
+  deliberately-configured `StrategyRegistry` exists to default to.
+- Phases F through G (risk, paper execution) are not yet started.
+
 ## Unreleased - Runtime Phase D: Strategy Engine (2026-07-16, no tag)
 
 Fourth of seven post-`v2.0.0` runtime phases. Wires `RegimeState`s to

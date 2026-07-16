@@ -4,10 +4,19 @@ Never constructs a real `AlpacaHistoricalProvider` or hits the network
 -- a fake `HistoricalDataProvider` is always injected via
 `build_market_data_loop`'s `provider` parameter, matching this
 codebase's DI convention throughout.
+
+Once more than one stage is composed (Phase C onward), the resulting
+`on_bar` is an opaque closure from `app.pipeline.compose_pipeline`, not
+a single emitter's method -- so "is this stage wired to that one"
+verification below drives the loop end to end (calling the private
+`loop._on_bar(bar)`, the same attribute Phase A/B's own tests already
+reach into) and checks the metrics a later stage recorded, rather than
+comparing callable identity.
 """
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -15,6 +24,7 @@ import pytest
 from app.bootstrap import (
     build_feature_loop,
     build_market_data_loop,
+    build_orchestration_loop,
     build_regime_loop,
     build_strategy_loop,
     current_git_commit,
@@ -22,14 +32,18 @@ from app.bootstrap import (
 from app.config import FeatureLoopConfig, MarketDataLoopConfig, RegimeLoopConfig
 from app.exceptions import GitCommitUnavailableError
 from app.features_loop import FeatureVectorEmitter
+from app.orchestration_loop import OrchestrationEmitter
 from app.regime_loop import RegimeEmitter
 from app.runtime import MarketDataLoop
 from app.strategy_loop import StrategyEmitter
+from features.feature_vector import FeatureVector
+from hmm.models import RegimeState
 from market_data.errors import ProviderConnectionError
 from market_data.models import Bar, Timeframe
 from ops.checks import CallableHealthCheck
 from ops.exceptions import RuntimeValidationError, UnhealthyPlatformError
 from ops.models import RuntimeContext
+from strategy.models import StrategyDecision
 from strategy.registry import StrategyRegistry
 from strategy.strategies import create_growth_strategy
 
@@ -99,7 +113,7 @@ class TestBuildMarketDataLoop:
         loop, runtime_context = build_market_data_loop(_config(), provider=_FakeProvider())
         assert isinstance(loop, MarketDataLoop)
         assert isinstance(runtime_context, RuntimeContext)
-        assert runtime_context.platform_info.version == "0.4.0"
+        assert runtime_context.platform_info.version == "0.5.0"
 
     def test_raises_runtime_validation_error_when_secret_missing(
         self, monkeypatch: pytest.MonkeyPatch
@@ -131,11 +145,13 @@ class TestBuildFeatureLoop:
         assert isinstance(loop, MarketDataLoop)
         assert isinstance(runtime_context, RuntimeContext)
         assert isinstance(emitter, FeatureVectorEmitter)
-        assert runtime_context.platform_info.version == "0.4.0"
+        assert runtime_context.platform_info.version == "0.5.0"
 
-    def test_wires_the_emitter_as_the_loops_on_bar_callback(self) -> None:
+    def test_on_bar_drives_the_emitter(self) -> None:
         loop, _, emitter = build_feature_loop(_feature_config(), provider=_FakeProvider())
-        assert loop._on_bar == emitter.handle_bar
+        assert loop._on_bar is not None
+        loop._on_bar(_bar())
+        assert emitter.metrics.counter("feature_vectors_emitted_total").value == 1.0
 
     def test_emitter_metrics_start_empty(self) -> None:
         _, _, emitter = build_feature_loop(_feature_config(), provider=_FakeProvider())
@@ -153,14 +169,6 @@ class TestBuildFeatureLoop:
         with pytest.raises(UnhealthyPlatformError):
             build_feature_loop(_feature_config(), provider=_FakeProvider(healthy=False))
 
-    def test_on_frame_is_passed_through_to_the_emitter(self) -> None:
-        received: list[object] = []
-        callback = received.append
-        _, _, emitter = build_feature_loop(
-            _feature_config(), provider=_FakeProvider(), on_frame=callback
-        )
-        assert emitter._on_frame is callback
-
     def test_extra_checks_are_included_in_the_health_gate(self) -> None:
         failing_check = CallableHealthCheck("always_fails", lambda: False)
         with pytest.raises(UnhealthyPlatformError):
@@ -172,6 +180,19 @@ class TestBuildFeatureLoop:
 class _FakeRegimeService:
     def __init__(self, n_states: int = 3) -> None:
         self.n_states = n_states
+
+    def infer(self, history: Sequence[FeatureVector]) -> RegimeState:
+        vector = history[-1]
+        return RegimeState(
+            timestamp=vector.timestamp,
+            symbol=vector.symbol,
+            regime_id=0,
+            confidence=0.8,
+            transition_probability=0.9,
+            model_version="fake",
+            feature_pipeline_version=vector.provenance.pipeline_version,
+            metadata={},
+        )
 
 
 def _regime_config() -> RegimeLoopConfig:
@@ -187,13 +208,16 @@ class TestBuildRegimeLoop:
         assert isinstance(runtime_context, RuntimeContext)
         assert isinstance(feature_emitter, FeatureVectorEmitter)
         assert isinstance(regime_emitter, RegimeEmitter)
-        assert runtime_context.platform_info.version == "0.4.0"
+        assert runtime_context.platform_info.version == "0.5.0"
 
-    def test_wires_the_regime_emitter_as_the_feature_emitters_on_frame_callback(self) -> None:
-        _, _, feature_emitter, regime_emitter = build_regime_loop(
+    def test_on_bar_drives_both_emitters(self) -> None:
+        loop, _, feature_emitter, regime_emitter = build_regime_loop(
             _regime_config(), _FakeRegimeService(), provider=_FakeProvider()  # type: ignore[arg-type]
         )
-        assert feature_emitter._on_frame == regime_emitter.handle_frame
+        assert loop._on_bar is not None
+        loop._on_bar(_bar())
+        assert feature_emitter.metrics.counter("feature_vectors_emitted_total").value == 1.0
+        assert regime_emitter.metrics.counter("regime_states_emitted_total").value == 1.0
 
     def test_regime_emitter_metrics_start_empty(self) -> None:
         _, _, _, regime_emitter = build_regime_loop(
@@ -248,16 +272,20 @@ class TestBuildStrategyLoop:
         assert isinstance(feature_emitter, FeatureVectorEmitter)
         assert isinstance(regime_emitter, RegimeEmitter)
         assert isinstance(strategy_emitter, StrategyEmitter)
-        assert runtime_context.platform_info.version == "0.4.0"
+        assert runtime_context.platform_info.version == "0.5.0"
 
-    def test_wires_the_strategy_emitter_as_the_regime_emitters_on_frame_callback(self) -> None:
-        _, _, _, regime_emitter, strategy_emitter = build_strategy_loop(
+    def test_on_bar_drives_all_three_emitters(self) -> None:
+        loop, _, feature_emitter, regime_emitter, strategy_emitter = build_strategy_loop(
             _regime_config(),
             _FakeRegimeService(),  # type: ignore[arg-type]
             _strategy_registry(),
             provider=_FakeProvider(),
         )
-        assert regime_emitter._on_frame == strategy_emitter.handle_frame
+        assert loop._on_bar is not None
+        loop._on_bar(_bar())
+        assert feature_emitter.metrics.counter("feature_vectors_emitted_total").value == 1.0
+        assert regime_emitter.metrics.counter("regime_states_emitted_total").value == 1.0
+        assert strategy_emitter.metrics.counter("strategy_decisions_emitted_total").value == 1.0
 
     def test_strategy_emitter_metrics_start_empty(self) -> None:
         _, _, _, _, strategy_emitter = build_strategy_loop(
@@ -302,6 +330,104 @@ class TestBuildStrategyLoop:
     def test_raises_unhealthy_platform_error_when_strategy_registry_is_empty(self) -> None:
         with pytest.raises(UnhealthyPlatformError):
             build_strategy_loop(
+                _regime_config(),
+                _FakeRegimeService(),  # type: ignore[arg-type]
+                _strategy_registry(populated=False),
+                provider=_FakeProvider(),
+            )
+
+
+class TestBuildOrchestrationLoop:
+    def test_builds_loop_context_and_all_four_emitters_when_healthy(self) -> None:
+        (
+            loop,
+            runtime_context,
+            feature_emitter,
+            regime_emitter,
+            strategy_emitter,
+            orchestration_emitter,
+        ) = build_orchestration_loop(
+            _regime_config(),
+            _FakeRegimeService(),  # type: ignore[arg-type]
+            _strategy_registry(),
+            provider=_FakeProvider(),
+        )
+        assert isinstance(loop, MarketDataLoop)
+        assert isinstance(runtime_context, RuntimeContext)
+        assert isinstance(feature_emitter, FeatureVectorEmitter)
+        assert isinstance(regime_emitter, RegimeEmitter)
+        assert isinstance(strategy_emitter, StrategyEmitter)
+        assert isinstance(orchestration_emitter, OrchestrationEmitter)
+        assert runtime_context.platform_info.version == "0.5.0"
+
+    def test_on_bar_drives_all_four_emitters(self) -> None:
+        loop, _, feature_emitter, regime_emitter, strategy_emitter, orchestration_emitter = (
+            build_orchestration_loop(
+                _regime_config(),
+                _FakeRegimeService(),  # type: ignore[arg-type]
+                _strategy_registry(),
+                provider=_FakeProvider(),
+            )
+        )
+        assert loop._on_bar is not None
+        loop._on_bar(_bar())
+        assert feature_emitter.metrics.counter("feature_vectors_emitted_total").value == 1.0
+        assert regime_emitter.metrics.counter("regime_states_emitted_total").value == 1.0
+        assert strategy_emitter.metrics.counter("strategy_decisions_emitted_total").value == 1.0
+        assert orchestration_emitter.metrics.counter("final_decisions_emitted_total").value == 1.0
+
+    def test_learning_decision_provider_is_passed_through_to_the_emitter(self) -> None:
+        calls: list[StrategyDecision] = []
+
+        def _provider(decision: StrategyDecision) -> None:
+            calls.append(decision)
+            return None
+
+        loop, *_ = build_orchestration_loop(
+            _regime_config(),
+            _FakeRegimeService(),  # type: ignore[arg-type]
+            _strategy_registry(),
+            provider=_FakeProvider(),
+            learning_decision_provider=_provider,
+        )
+        assert loop._on_bar is not None
+        loop._on_bar(_bar())
+        assert len(calls) == 1
+
+    def test_orchestration_emitter_metrics_start_empty(self) -> None:
+        *_, orchestration_emitter = build_orchestration_loop(
+            _regime_config(),
+            _FakeRegimeService(),  # type: ignore[arg-type]
+            _strategy_registry(),
+            provider=_FakeProvider(),
+        )
+        assert orchestration_emitter.metrics.counters == ()
+        assert orchestration_emitter.metrics.gauges == ()
+
+    def test_raises_runtime_validation_error_when_secret_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("ALPACA_API_KEY", raising=False)
+        with pytest.raises(RuntimeValidationError):
+            build_orchestration_loop(
+                _regime_config(),
+                _FakeRegimeService(),  # type: ignore[arg-type]
+                _strategy_registry(),
+                provider=_FakeProvider(),
+            )
+
+    def test_raises_unhealthy_platform_error_when_connectivity_check_fails(self) -> None:
+        with pytest.raises(UnhealthyPlatformError):
+            build_orchestration_loop(
+                _regime_config(),
+                _FakeRegimeService(),  # type: ignore[arg-type]
+                _strategy_registry(),
+                provider=_FakeProvider(healthy=False),
+            )
+
+    def test_raises_unhealthy_platform_error_when_strategy_registry_is_empty(self) -> None:
+        with pytest.raises(UnhealthyPlatformError):
+            build_orchestration_loop(
                 _regime_config(),
                 _FakeRegimeService(),  # type: ignore[arg-type]
                 _strategy_registry(populated=False),

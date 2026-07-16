@@ -1,15 +1,16 @@
-"""`RegimeEmitter` -- Phase C: `FeatureVectorEmitter`'s `on_frame` hook
-wired to `RegimeService`. See
+"""`RegimeEmitter` -- Phase C: the stage after `FeatureVectorEmitter` in
+the composed pipeline, wired to `RegimeService`. See
 docs/engineering-handbook/Architecture/ADR/ADR-029-Runtime-Regime-Detection-Design.md
 and
-docs/engineering-handbook/Architecture/ADR/ADR-030-Runtime-Strategy-Engine-Design.md.
+docs/engineering-handbook/Architecture/ADR/ADR-031-Signal-Orchestration-Design.md.
 
 `handle_frame` is the whole surface: append `frame.feature_vector` to a
 bounded per-symbol `FeatureVectorBuffer`, call `RegimeService.infer`
 on whatever history exists so far, log one structured event per
-computed `RegimeState`, and record it on an `ops.metrics.MetricsRegistry`.
-A failure is caught and logged, never propagated -- one bad inference
-attempt (most commonly: not enough clean history yet, `hmm.exceptions.
+computed `RegimeState`, record it on an `ops.metrics.MetricsRegistry`,
+and return the enriched frame -- or `None` on failure. A failure is
+caught and logged, never propagated -- one bad inference attempt (most
+commonly: not enough clean history yet, `hmm.exceptions.
 InsufficientDataError`) must not stop the feature pipeline that fed it,
 matching `FeatureVectorEmitter`'s own failure-isolation convention.
 Self-heals once the buffer's bounded eviction has aged out every
@@ -24,7 +25,7 @@ import logging
 import time
 
 from app.buffer import FeatureVectorBuffer
-from app.frame import RuntimeFrame, RuntimeFrameCallback
+from app.frame import RuntimeFrame
 from hmm.exceptions import HMMError
 from hmm.service import RegimeService
 from ops.metrics import MetricsRegistry
@@ -38,12 +39,9 @@ DEFAULT_MAX_FEATURE_VECTORS = 200
 
 
 class RegimeEmitter:
-    """Wraps exactly one `RegimeService`. `on_frame`, if given, is this
-    class's own extension point for the next phase (Phase D: strategy)
-    -- the same "each phase exposes one clean hook for the next" shape
-    `MarketDataLoop.on_bar`/`FeatureVectorEmitter.on_frame` already
-    established. Its failures are caught and logged, never propagated,
-    for the same containment reason.
+    """Wraps exactly one `RegimeService`. Holds no "next stage" hook --
+    see `app.pipeline.compose_pipeline` for how this is wired to
+    whatever comes after it.
     """
 
     def __init__(
@@ -52,18 +50,16 @@ class RegimeEmitter:
         *,
         buffer: FeatureVectorBuffer | None = None,
         metrics: MetricsRegistry | None = None,
-        on_frame: RuntimeFrameCallback | None = None,
     ) -> None:
         self._service = regime_service
         self._buffer = buffer or FeatureVectorBuffer(max_vectors=DEFAULT_MAX_FEATURE_VECTORS)
         self._metrics = metrics or MetricsRegistry()
-        self._on_frame = on_frame
 
     @property
     def metrics(self) -> MetricsRegistry:
         return self._metrics
 
-    def handle_frame(self, frame: RuntimeFrame) -> None:
+    def handle_frame(self, frame: RuntimeFrame) -> RuntimeFrame | None:
         if frame.feature_vector is None:
             raise ValueError("RuntimeFrame reached RegimeEmitter without a feature_vector")
         vector = frame.feature_vector
@@ -87,7 +83,7 @@ class RegimeEmitter:
                     "error": str(exc),
                 },
             )
-            return
+            return None
         latency_seconds = time.perf_counter() - started_at
 
         self._metrics.counter(
@@ -113,19 +109,7 @@ class RegimeEmitter:
             },
         )
 
-        if self._on_frame is not None:
-            enriched = frame.with_regime_state(state)
-            try:
-                self._on_frame(enriched)
-            except Exception as exc:
-                logger.warning(
-                    "on_frame callback failed",
-                    extra={
-                        "event": "on_frame_callback_failed",
-                        "symbol": state.symbol,
-                        "error": str(exc),
-                    },
-                )
+        return frame.with_regime_state(state)
 
 
 __all__ = ["DEFAULT_MAX_FEATURE_VECTORS", "RegimeEmitter"]
