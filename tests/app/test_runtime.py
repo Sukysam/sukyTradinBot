@@ -197,3 +197,56 @@ class TestMarketDataLoop:
         )
         await loop.stop()
         await loop.stop()  # must not raise
+
+    async def test_on_bar_is_called_once_per_new_bar(self) -> None:
+        bar = _bar("AAPL", T0)
+        provider = _FakeProvider(responses=[[bar]])
+        received: list[Bar] = []
+        loop_holder: list[MarketDataLoop] = []
+        loop = MarketDataLoop(
+            provider,
+            symbols=["AAPL"],
+            timeframe=Timeframe.DAY_1,
+            poll_interval_seconds=1.0,
+            lookback=timedelta(days=5),
+            clock=FixedClock(T0),
+            sleep=_stopping_sleep(loop_holder, stop_after=1),
+            on_bar=received.append,
+        )
+        loop_holder.append(loop)
+
+        await loop.start()
+
+        assert received == [bar]
+
+    async def test_on_bar_failure_is_logged_and_does_not_stop_the_loop(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        first = _bar("AAPL", T0)
+        second = _bar("AAPL", T0 + timedelta(days=1))
+        provider = _FakeProvider(responses=[[first], [first, second]])
+        loop_holder: list[MarketDataLoop] = []
+
+        def _boom(_bar: Bar) -> None:
+            raise RuntimeError("simulated callback failure")
+
+        loop = MarketDataLoop(
+            provider,
+            symbols=["AAPL"],
+            timeframe=Timeframe.DAY_1,
+            poll_interval_seconds=1.0,
+            lookback=timedelta(days=5),
+            clock=FixedClock(T0),
+            sleep=_stopping_sleep(loop_holder, stop_after=2),
+            on_bar=_boom,
+        )
+        loop_holder.append(loop)
+
+        with caplog.at_level(logging.INFO, logger="app.runtime"):
+            await loop.start()
+
+        failures = [
+            r for r in caplog.records if getattr(r, "event", None) == "on_bar_callback_failed"
+        ]
+        assert len(failures) == 2
+        assert len(_bar_events(caplog.records)) == 2

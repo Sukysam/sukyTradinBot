@@ -8,19 +8,24 @@ docs/engineering-handbook/Architecture/ADR/ADR-027-Runtime-Market-Data-Loop-Desi
 from __future__ import annotations
 
 import subprocess
+from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 
 from alpaca.data.enums import DataFeed
 
-from app.config import MarketDataLoopConfig
+from app.buffer import BarBuffer
+from app.config import FeatureLoopConfig, MarketDataLoopConfig
 from app.exceptions import GitCommitUnavailableError
-from app.runtime import MarketDataLoop
+from app.features_loop import FeatureVectorEmitter
+from app.runtime import BarCallback, MarketDataLoop
 from common.config import Settings
 from common.time import SystemClock
+from features.registry import DEFAULT_REGISTRY
 from market_data.interfaces import HistoricalDataProvider
 from market_data.models import Timeframe
 from market_data.providers.alpaca_historical import AlpacaHistoricalProvider
-from ops.checks import market_data_check
+from ops.checks import feature_registry_check, market_data_check
+from ops.interfaces import HealthCheck
 from ops.models import RuntimeContext
 from ops.secrets import EnvSecretSource
 from ops.startup import build_runtime_context
@@ -28,7 +33,8 @@ from ops.validation import require_valid_runtime, validate_runtime
 
 _REQUIRED_SECRETS = ("ALPACA_API_KEY", "ALPACA_SECRET_KEY")
 
-__version__ = "0.1.0"
+# Bumped 0.1.0 -> 0.2.0 for Phase B (feature pipeline) -- see ADR-028.
+__version__ = "0.2.0"
 
 # One day back avoids the free-tier "recent SIP data" restriction the
 # probe would otherwise hit -- see ADR-027 and
@@ -73,11 +79,21 @@ def _connectivity_probe(
     return True
 
 
+def _feature_registry_probe() -> bool:
+    """The registry is populated as an import side effect of `import
+    features` (see `features/__init__.py`) -- this only confirms that
+    side effect actually ran and produced at least one feature, not
+    that any particular feature is present."""
+    return len(DEFAULT_REGISTRY) > 0
+
+
 def build_market_data_loop(
     config: MarketDataLoopConfig,
     *,
     feed: DataFeed = DataFeed.IEX,
     provider: HistoricalDataProvider | None = None,
+    on_bar: BarCallback | None = None,
+    extra_checks: Sequence[HealthCheck] = (),
 ) -> tuple[MarketDataLoop, RuntimeContext]:
     """Validate startup configuration/credentials, then build a
     `MarketDataLoop` ready to `start()`.
@@ -90,12 +106,17 @@ def build_market_data_loop(
     (`AlpacaHistoricalProvider.__init__`'s own `bars_client` parameter
     included).
 
+    `on_bar` and `extra_checks` are how a later phase extends this
+    function without rewriting it -- see `build_feature_loop` below,
+    which passes `on_bar=emitter.handle_bar` and
+    `extra_checks=[feature_registry_check(...)]`.
+
     Raises `ops.exceptions.RuntimeValidationError` if `ALPACA_API_KEY`/
     `ALPACA_SECRET_KEY` aren't set, and `ops.exceptions.
-    UnhealthyPlatformError` if the market-data connectivity check fails
-    -- both before any loop iteration runs, per this platform's
-    established "fail fast at startup, not on the first poll"
-    convention (`ops.startup.build_runtime_context`).
+    UnhealthyPlatformError` if any health check fails -- both before
+    any loop iteration runs, per this platform's established "fail
+    fast at startup, not on the first poll" convention
+    (`ops.startup.build_runtime_context`).
     """
     environment = Settings().environment
     git_commit = current_git_commit()
@@ -119,17 +140,15 @@ def build_market_data_loop(
     if provider is None:
         provider = AlpacaHistoricalProvider(feed=feed)
 
-    # Only `market_data_check` -- the only subsystem this Phase A loop
-    # actually touches. The other nine checks in `ops.checks` (feature
-    # registry, HMM model, risk service, ...) describe subsystems no
-    # code path in this runtime reaches yet; including them here would
-    # just be noise that always fails, not a real signal. Extend this
-    # list as later phases wire in the pipeline stages those checks
-    # describe.
+    # `market_data_check` plus whatever `extra_checks` the caller adds
+    # for subsystems it wires in -- the other `ops.checks` factories
+    # (HMM model, risk service, ...) still describe subsystems no code
+    # path in this runtime reaches yet, so they stay excluded here.
     checks = [
         market_data_check(
             lambda: _connectivity_probe(provider, config.symbols[0], config.timeframe)
         ),
+        *extra_checks,
     ]
 
     runtime_context = build_runtime_context(
@@ -147,8 +166,33 @@ def build_market_data_loop(
         poll_interval_seconds=config.poll_interval_seconds,
         lookback=config.lookback,
         clock=SystemClock(),
+        on_bar=on_bar,
     )
     return loop, runtime_context
 
 
-__all__ = ["build_market_data_loop", "current_git_commit"]
+def build_feature_loop(
+    config: FeatureLoopConfig,
+    *,
+    feed: DataFeed = DataFeed.IEX,
+    provider: HistoricalDataProvider | None = None,
+) -> tuple[MarketDataLoop, RuntimeContext, FeatureVectorEmitter]:
+    """Phase B composition root. Builds a `FeatureVectorEmitter` first,
+    then delegates every Phase A concern -- secret validation,
+    connectivity probe, `MarketDataLoop` construction -- to
+    `build_market_data_loop`, wiring `emitter.handle_bar` in as
+    `on_bar` and `feature_registry_check` in as an extra health check.
+    No composition logic is duplicated between phases; see ADR-028.
+    """
+    emitter = FeatureVectorEmitter(buffer=BarBuffer(max_bars=config.max_bars_per_symbol))
+    loop, runtime_context = build_market_data_loop(
+        config.market_data,
+        feed=feed,
+        provider=provider,
+        on_bar=emitter.handle_bar,
+        extra_checks=[feature_registry_check(_feature_registry_probe)],
+    )
+    return loop, runtime_context, emitter
+
+
+__all__ = ["build_feature_loop", "build_market_data_loop", "current_git_commit"]

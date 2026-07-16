@@ -1,7 +1,8 @@
-"""Process entrypoint: `python -m app`. Builds the Phase A market-data
-loop, starts it, and stops it cleanly on SIGINT/SIGTERM. No business
-logic -- see `app.bootstrap` for composition, `app.runtime` for the
-loop itself.
+"""Process entrypoint: `python -m app`. Builds the Phase B runtime
+(`MarketDataLoop` -> `FeatureVectorEmitter` -> `FeatureVector`), starts
+it, and stops it cleanly on SIGINT/SIGTERM. No business logic -- see
+`app.bootstrap` for composition, `app.runtime`/`app.features_loop` for
+the loop and feature computation themselves.
 """
 
 from __future__ import annotations
@@ -11,27 +12,29 @@ import logging
 import signal
 from datetime import timedelta
 
-from app.bootstrap import build_market_data_loop
-from app.config import MarketDataLoopConfig
+from app.bootstrap import build_feature_loop
+from app.config import FeatureLoopConfig, MarketDataLoopConfig
 from common.logging import configure_logging
 from market_data.models import Timeframe
 
 logger = logging.getLogger(__name__)
 
-# Placeholder defaults for Phase A -- a dedicated config source (env
+# Placeholder defaults for Phase B -- a dedicated config source (env
 # vars, config/*.yaml) is deferred to a later phase; see ADR-027's
 # Alternatives Considered.
-_DEFAULT_CONFIG = MarketDataLoopConfig(
-    symbols=("AAPL",),
-    timeframe=Timeframe.DAY_1,
-    poll_interval_seconds=300.0,
-    lookback=timedelta(days=5),
+_DEFAULT_CONFIG = FeatureLoopConfig(
+    market_data=MarketDataLoopConfig(
+        symbols=("AAPL",),
+        timeframe=Timeframe.DAY_1,
+        poll_interval_seconds=300.0,
+        lookback=timedelta(days=5),
+    ),
 )
 
 
 async def _run() -> None:
     configure_logging()
-    loop, runtime_context = build_market_data_loop(_DEFAULT_CONFIG)
+    loop, runtime_context, _emitter = build_feature_loop(_DEFAULT_CONFIG)
     logger.info(
         "market data loop starting",
         extra={
@@ -39,7 +42,7 @@ async def _run() -> None:
             "environment": runtime_context.environment,
             "version": runtime_context.platform_info.version,
             "git_commit": runtime_context.platform_info.git_commit,
-            "symbols": list(_DEFAULT_CONFIG.symbols),
+            "symbols": list(_DEFAULT_CONFIG.market_data.symbols),
         },
     )
 

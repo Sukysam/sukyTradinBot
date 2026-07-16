@@ -7,7 +7,7 @@ from datetime import timedelta
 
 import pytest
 
-from app.config import MarketDataLoopConfig
+from app.config import FeatureLoopConfig, MarketDataLoopConfig
 from market_data.models import Timeframe
 
 
@@ -51,3 +51,18 @@ class TestMarketDataLoopConfig:
         config = _config()
         with pytest.raises(AttributeError):
             config.poll_interval_seconds = 60.0  # type: ignore[misc]
+
+
+class TestFeatureLoopConfig:
+    def test_valid_config_constructs_with_default_max_bars(self) -> None:
+        config = FeatureLoopConfig(market_data=_config())
+        assert config.max_bars_per_symbol == 200
+
+    def test_rejects_non_positive_max_bars_per_symbol(self) -> None:
+        with pytest.raises(ValueError, match="max_bars_per_symbol"):
+            FeatureLoopConfig(market_data=_config(), max_bars_per_symbol=0)
+
+    def test_is_frozen(self) -> None:
+        config = FeatureLoopConfig(market_data=_config())
+        with pytest.raises(AttributeError):
+            config.max_bars_per_symbol = 50  # type: ignore[misc]
