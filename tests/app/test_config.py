@@ -7,7 +7,7 @@ from datetime import timedelta
 
 import pytest
 
-from app.config import FeatureLoopConfig, MarketDataLoopConfig
+from app.config import FeatureLoopConfig, MarketDataLoopConfig, RegimeLoopConfig
 from market_data.models import Timeframe
 
 
@@ -66,3 +66,21 @@ class TestFeatureLoopConfig:
         config = FeatureLoopConfig(market_data=_config())
         with pytest.raises(AttributeError):
             config.max_bars_per_symbol = 50  # type: ignore[misc]
+
+
+class TestRegimeLoopConfig:
+    def test_valid_config_constructs_with_default_max_vectors(self) -> None:
+        config = RegimeLoopConfig(feature_loop=FeatureLoopConfig(market_data=_config()))
+        assert config.max_feature_vectors_per_symbol == 200
+
+    def test_rejects_non_positive_max_feature_vectors_per_symbol(self) -> None:
+        with pytest.raises(ValueError, match="max_feature_vectors_per_symbol"):
+            RegimeLoopConfig(
+                feature_loop=FeatureLoopConfig(market_data=_config()),
+                max_feature_vectors_per_symbol=0,
+            )
+
+    def test_is_frozen(self) -> None:
+        config = RegimeLoopConfig(feature_loop=FeatureLoopConfig(market_data=_config()))
+        with pytest.raises(AttributeError):
+            config.max_feature_vectors_per_symbol = 50  # type: ignore[misc]

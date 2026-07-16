@@ -48,4 +48,19 @@ class FeatureLoopConfig:
             raise ValueError("max_bars_per_symbol must be positive")
 
 
-__all__ = ["FeatureLoopConfig", "MarketDataLoopConfig"]
+@dataclass(frozen=True)
+class RegimeLoopConfig:
+    """What Phase C needs beyond `FeatureLoopConfig`: how many
+    `FeatureVector`s to retain per symbol for regime inference.
+    `feature_loop` is composed, not duplicated -- Phase C still needs
+    every Phase A/B setting."""
+
+    feature_loop: FeatureLoopConfig
+    max_feature_vectors_per_symbol: int = 200
+
+    def __post_init__(self) -> None:
+        if self.max_feature_vectors_per_symbol <= 0:
+            raise ValueError("max_feature_vectors_per_symbol must be positive")
+
+
+__all__ = ["FeatureLoopConfig", "MarketDataLoopConfig", "RegimeLoopConfig"]

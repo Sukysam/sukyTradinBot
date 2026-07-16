@@ -21,70 +21,77 @@ and has no entry below. See [PROJECT_STATUS.md](PROJECT_STATUS.md)'s
 "Release Milestones" section for the full grouping and what each
 umbrella tag actually points at.
 
-## Unreleased - Runtime Phase A: Market Data Loop (2026-07-15, no tag)
+## Unreleased - Runtime Phase C: Regime Detection (2026-07-16, no tag)
 
-First of seven post-`v2.0.0` runtime phases (A through G), the
-continuously-running application this platform has never had. Per
-explicit direction, this is deliberately *not* "Milestone 13" — the
-planned roadmap is done; this is continuous product evolution, one
-small reviewed increment at a time. Design and implementation recorded
-together in ADR-027, same single-record cadence Milestone 12's work
-packages established.
+Third of seven post-`v2.0.0` runtime phases. Wires `FeatureVector`s to
+`hmm.service.RegimeService` so the runtime performs causal regime
+inference on each update and emits a `RegimeState` -- nothing beyond
+that (no strategy, no memory, no NLP, no orchestration, no risk, no
+execution). Design and implementation recorded together in ADR-029,
+extending Phase B's `app.bootstrap`/`app.features_loop` rather than
+rewriting either.
 
 ### Added
-- `src/app/` -- a new runtime package, deliberately separate from the
-  legacy `regime-trader/main.py` skeleton (which still raises
-  `NotImplementedError` by design).
-- `app.runtime.MarketDataLoop` -- polls `HistoricalDataProvider.get_bars`
-  per symbol on an interval, dedupes against a per-symbol last-seen
-  timestamp, logs one structured `bar_received` event per new bar.
-  Implements `common.interfaces.Service` (`start`/`stop`), mirroring
-  `AlpacaStreamingProvider`'s exact lifecycle shape. A fetch failure for
-  one symbol is logged (`market_data_fetch_failed`) and never stops the
-  loop or crashes the process.
-- `app.config.MarketDataLoopConfig` -- which symbols, how often.
-- `app.bootstrap.build_market_data_loop` -- composition root: validates
-  `ALPACA_API_KEY`/`ALPACA_SECRET_KEY` via `ops.validation` before
-  constructing the default provider, then calls `ops.startup.
-  build_runtime_context` with a real `market_data_check` connectivity
-  probe. `provider` is injectable, matching this codebase's DI
-  convention throughout.
-- `app.main` -- `python -m app` process entrypoint with
-  `SIGINT`/`SIGTERM` graceful shutdown.
-- `market_data.providers.alpaca_historical.AlpacaHistoricalProvider`
-  gains a `feed: DataFeed` parameter, defaulting to `DataFeed.IEX` --
-  fixes a real gap this phase's own first live-account exercise
-  surfaced: no explicit `feed` silently defaulted to Alpaca's SIP feed,
-  unreachable on a free-tier account for data less than ~15 minutes
-  old (`403 subscription does not permit querying recent SIP data`).
-  Now matches `AlpacaStreamingProvider`'s existing `DataFeed.IEX`
-  default, closing a pre-existing inconsistency between the two
-  providers.
-- 19 new tests across `tests/app/` and two new feed-configuration tests
-  in `tests/market_data/test_alpaca_historical.py`.
+- `app.buffer.FeatureVectorBuffer` -- a second bounded per-symbol
+  buffer (`deque(maxlen=200)`), structurally identical to `BarBuffer`
+  but typed to `FeatureVector`; kept as a separate class rather than
+  generalizing `BarBuffer` to avoid touching Phase B's shipped code.
+- `app.regime_loop.RegimeEmitter` -- `handle_feature_vector(vector)`
+  appends to a `FeatureVectorBuffer`, calls `RegimeService.infer` (the
+  one sanctioned entry point into `hmm` -- never a raw `GaussianHMM`),
+  logs one `regime_state_emitted` event per success (symbol, timestamp,
+  regime_id, confidence, transition_probability, model_version,
+  latency), and records `ops.metrics.MetricsRegistry`'s second real
+  production consumer (`regime_states_emitted_total` counter,
+  `regime_inference_latency_seconds` gauge,
+  `regime_inference_errors_total` counter). An inference failure
+  (typically `InsufficientDataError` while warm-up-flagged vectors
+  remain in the buffer) is caught and logged
+  (`regime_inference_failed`), never propagated -- self-heals once the
+  buffer's bounded eviction ages those vectors out. Exposes an optional
+  `on_regime_state` hook for the next phase (Phase D: strategy).
+- `app.config.RegimeLoopConfig` -- composes `FeatureLoopConfig` plus
+  `max_feature_vectors_per_symbol` (default `200`).
+- `app.bootstrap.build_feature_loop` gains two additive, optional
+  parameters -- `on_feature_vector` and `extra_checks` -- mirroring
+  Phase B's own `on_bar`/`extra_checks` on `build_market_data_loop`.
+- `app.bootstrap.build_regime_loop` -- Phase C's composition root:
+  builds a `RegimeEmitter`, then delegates to `build_feature_loop`
+  with `on_feature_vector=regime_emitter.handle_feature_vector` and
+  `extra_checks=[hmm_model_check(...)]`. Returns `(loop,
+  runtime_context, feature_emitter, regime_emitter)`. **`regime_service:
+  RegimeService` is a required, injected parameter -- unlike
+  `provider`, there is no default construction, since this project has
+  no trained/persisted HMM model artifact anywhere yet.**
+- 24 new tests across `tests/app/` (`test_regime_loop.py`, plus
+  additions to `test_buffer.py`, `test_bootstrap.py`,
+  `test_config.py`), bringing `tests/app/` to 67 total (up from 43).
+  The regime-emitter success path uses a real, cheaply-trained
+  `RegimeService` (same pattern as `tests/hmm/test_service.py`), not a
+  fake.
 
 ### Changed
-- Nothing in any existing package's public contract changed --
-  `AlpacaHistoricalProvider.feed` is a new optional constructor
-  parameter with a default, not a breaking change.
+- `app.__version__` bumped `0.2.0` -> `0.3.0`; `app.bootstrap.
+  __version__` likewise bumped `0.2.0` -> `0.3.0`.
+- Nothing in Phase A/B's tested public behavior changed -- every new
+  parameter on `build_market_data_loop`/`build_feature_loop` is
+  optional and defaults to the prior behavior exactly.
 
 ### Known limitations
-- `src/app/config.py`/`runtime.py`/`exceptions.py`/`__init__.py` are at
-  100% test coverage; `bootstrap.py` is at 96% (the real-provider-
-  construction path, when no provider is injected, is untested --
-  exercising it would require either a real network call or mocking
-  `alpaca-py`'s SDK internals, the same boundary
-  `tests/market_data/test_alpaca_historical.py` already draws for
-  `AlpacaHistoricalProvider` itself); `main.py` is at 43% (the
-  signal-handling entrypoint body is untested -- meaningfully
-  exercising OS signal delivery needs a subprocess, not a unit test,
-  the same honest gap already accepted for `nlp.sentiment.
-  FinBertSentimentScorer`'s untested body).
-- Phase A's symbol list and poll interval are a hardcoded module-level
-  default in `app.main` -- a real configuration source (env vars,
-  `config/*.yaml`) is deferred to a later phase.
-- Phases B through G (features, regime detection, strategy, signal
-  orchestration, risk, paper execution) are not yet started.
+- `app.buffer`/`app.regime_loop`/`app.features_loop`/`app.config`/
+  `app.runtime`/`app.__init__`/`app.exceptions` are at 100% test
+  coverage; `app.bootstrap` is at 97% (same one disclosed
+  real-provider-construction line as Phase A/B); `app.main` is at 43%
+  (same disclosed signal-handling gap as Phase A/B).
+- **`app.main` is *not* updated to run Phase C.** Wiring it in would
+  require a real, trained, persisted `RegimeService` at process
+  startup -- this project has never trained and saved a model against
+  real historical data, and building that training/persistence
+  pipeline is explicitly out of Phase C's scope. `build_regime_loop`
+  is fully implemented and tested, ready for a caller that supplies
+  its own `RegimeService`.
+- Phases D through G (strategy, signal orchestration, risk, paper
+  execution) are not yet started.
 
 ## Unreleased - Runtime Phase B: Feature Pipeline (2026-07-16, no tag)
 
@@ -156,7 +163,73 @@ either, per ADR-027's own Consequences prediction.
   ADR-028), not a bug: a consumer that cares about warm-up state reads
   `quality_flags`/`has_any_flag` off the emitted vector.
 - Phases C through G (regime detection, strategy, signal orchestration,
-  risk, paper execution) are not yet started.
+  risk, paper execution) are not yet started. (Phase C has since
+  shipped -- see the entry above.)
+
+## Unreleased - Runtime Phase A: Market Data Loop (2026-07-15, no tag)
+
+First of seven post-`v2.0.0` runtime phases (A through G), the
+continuously-running application this platform has never had. Per
+explicit direction, this is deliberately *not* "Milestone 13" — the
+planned roadmap is done; this is continuous product evolution, one
+small reviewed increment at a time. Design and implementation recorded
+together in ADR-027, same single-record cadence Milestone 12's work
+packages established.
+
+### Added
+- `src/app/` -- a new runtime package, deliberately separate from the
+  legacy `regime-trader/main.py` skeleton (which still raises
+  `NotImplementedError` by design).
+- `app.runtime.MarketDataLoop` -- polls `HistoricalDataProvider.get_bars`
+  per symbol on an interval, dedupes against a per-symbol last-seen
+  timestamp, logs one structured `bar_received` event per new bar.
+  Implements `common.interfaces.Service` (`start`/`stop`), mirroring
+  `AlpacaStreamingProvider`'s exact lifecycle shape. A fetch failure for
+  one symbol is logged (`market_data_fetch_failed`) and never stops the
+  loop or crashes the process.
+- `app.config.MarketDataLoopConfig` -- which symbols, how often.
+- `app.bootstrap.build_market_data_loop` -- composition root: validates
+  `ALPACA_API_KEY`/`ALPACA_SECRET_KEY` via `ops.validation` before
+  constructing the default provider, then calls `ops.startup.
+  build_runtime_context` with a real `market_data_check` connectivity
+  probe. `provider` is injectable, matching this codebase's DI
+  convention throughout.
+- `app.main` -- `python -m app` process entrypoint with
+  `SIGINT`/`SIGTERM` graceful shutdown.
+- `market_data.providers.alpaca_historical.AlpacaHistoricalProvider`
+  gains a `feed: DataFeed` parameter, defaulting to `DataFeed.IEX` --
+  fixes a real gap this phase's own first live-account exercise
+  surfaced: no explicit `feed` silently defaulted to Alpaca's SIP feed,
+  unreachable on a free-tier account for data less than ~15 minutes
+  old (`403 subscription does not permit querying recent SIP data`).
+  Now matches `AlpacaStreamingProvider`'s existing `DataFeed.IEX`
+  default, closing a pre-existing inconsistency between the two
+  providers.
+- 19 new tests across `tests/app/` and two new feed-configuration tests
+  in `tests/market_data/test_alpaca_historical.py`.
+
+### Changed
+- Nothing in any existing package's public contract changed --
+  `AlpacaHistoricalProvider.feed` is a new optional constructor
+  parameter with a default, not a breaking change.
+
+### Known limitations
+- `src/app/config.py`/`runtime.py`/`exceptions.py`/`__init__.py` are at
+  100% test coverage; `bootstrap.py` is at 96% (the real-provider-
+  construction path, when no provider is injected, is untested --
+  exercising it would require either a real network call or mocking
+  `alpaca-py`'s SDK internals, the same boundary
+  `tests/market_data/test_alpaca_historical.py` already draws for
+  `AlpacaHistoricalProvider` itself); `main.py` is at 43% (the
+  signal-handling entrypoint body is untested -- meaningfully
+  exercising OS signal delivery needs a subprocess, not a unit test,
+  the same honest gap already accepted for `nlp.sentiment.
+  FinBertSentimentScorer`'s untested body).
+- Phase A's symbol list and poll interval are a hardcoded module-level
+  default in `app.main` -- a real configuration source (env vars,
+  `config/*.yaml`) is deferred to a later phase.
+- Phases B through G (features, regime detection, strategy, signal
+  orchestration, risk, paper execution) are not yet started.
 
 ## v2.0.0 - Milestone 12 Complete: Production Operations (2026-07-15, tag `v2.0.0`)
 
