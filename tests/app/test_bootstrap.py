@@ -16,6 +16,7 @@ comparing callable identity.
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
@@ -38,6 +39,7 @@ from app.exceptions import GitCommitUnavailableError
 from app.execution_loop import BrokerSubmissionEmitter, ExecutionEmitter
 from app.features_loop import FeatureVectorEmitter
 from app.orchestration_loop import OrchestrationEmitter
+from app.pipeline import PipelineResult
 from app.regime_loop import RegimeEmitter
 from app.risk_loop import RiskEmitter
 from app.runtime import MarketDataLoop
@@ -631,6 +633,19 @@ def _fake_broker_adapter() -> MagicMock:
     return adapter
 
 
+class _RaisingRegimeService:
+    """Raises a plain `RuntimeError`, not `hmm.exceptions.HMMError` --
+    `RegimeEmitter.handle_frame` only catches `HMMError`, so this
+    propagates uncaught, the same "genuinely unexpected bug" scenario
+    `compose_pipeline`'s `on_result` reporting-then-re-raising exists
+    for (see ADR-033 Decision 5)."""
+
+    n_states = 3
+
+    def infer(self, history: Sequence[FeatureVector]) -> RegimeState:
+        raise RuntimeError("simulated unexpected bug")
+
+
 class TestBuildExecutionLoop:
     def test_builds_loop_context_and_all_seven_emitters_when_healthy(self) -> None:
         (
@@ -708,6 +723,75 @@ class TestBuildExecutionLoop:
         )
         assert broker_emitter.metrics.counters == ()
         assert broker_emitter.metrics.gauges == ()
+
+    def test_default_on_result_logs_a_terminal_pipeline_result_event(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        loop, *_ = build_execution_loop(
+            _regime_config(),
+            _FakeRegimeService(),  # type: ignore[arg-type]
+            _strategy_registry(),
+            _portfolio_state,
+            _account_state,
+            execution_service=_fake_execution_service(),
+            broker_adapter=_fake_broker_adapter(),
+            provider=_FakeProvider(),
+        )
+        assert loop._on_bar is not None
+        with caplog.at_level(logging.INFO, logger="app.bootstrap"):
+            loop._on_bar(_bar())
+
+        events = [r for r in caplog.records if getattr(r, "event", None) == "pipeline_completed"]
+        assert len(events) == 1
+        assert events[0].completed_stage == "broker_submission"  # type: ignore[attr-defined]
+        assert events[0].symbol == "AAPL"  # type: ignore[attr-defined]
+
+    def test_default_on_result_logs_a_warning_when_a_stage_raises_unexpectedly(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        loop, *_ = build_execution_loop(
+            _regime_config(),
+            _RaisingRegimeService(),  # type: ignore[arg-type]
+            _strategy_registry(),
+            _portfolio_state,
+            _account_state,
+            execution_service=_fake_execution_service(),
+            broker_adapter=_fake_broker_adapter(),
+            provider=_FakeProvider(),
+        )
+        assert loop._on_bar is not None
+        with (
+            caplog.at_level(logging.WARNING, logger="app.bootstrap"),
+            pytest.raises(RuntimeError, match="simulated unexpected bug"),
+        ):
+            loop._on_bar(_bar())
+
+        events = [r for r in caplog.records if getattr(r, "event", None) == "pipeline_stage_raised"]
+        assert len(events) == 1
+        assert events[0].completed_stage == "regime"  # type: ignore[attr-defined]
+        assert events[0].error == "simulated unexpected bug"  # type: ignore[attr-defined]
+
+    def test_custom_on_result_overrides_the_default_logger(self) -> None:
+        results: list[PipelineResult] = []
+        loop, *_ = build_execution_loop(
+            _regime_config(),
+            _FakeRegimeService(),  # type: ignore[arg-type]
+            _strategy_registry(),
+            _portfolio_state,
+            _account_state,
+            execution_service=_fake_execution_service(),
+            broker_adapter=_fake_broker_adapter(),
+            on_result=results.append,
+            provider=_FakeProvider(),
+        )
+        assert loop._on_bar is not None
+        loop._on_bar(_bar())
+
+        assert len(results) == 1
+        assert results[0].success is True
+        assert results[0].completed_stage == "broker_submission"
+        assert results[0].frame is not None
+        assert results[0].frame.broker_submission_result is not None
 
     def test_execution_service_and_broker_adapter_default_when_not_given(self) -> None:
         # Neither has a trained-model/domain-mapping dependency like

@@ -138,6 +138,47 @@ None`, `broker_submission_result: BrokerSubmissionResult | None = None`,
 `execution_decision`; `broker_submission_result` requires
 `order_intent`).
 
+### 5. `app.pipeline.PipelineResult`: one reporting channel wrapping `RuntimeFrame`
+
+Reviewed and requested before merge: a lightweight object reporting
+which named stage a pipeline run reached and whether it succeeded, so a
+caller has one place to observe runtime status instead of correlating
+each stage's own separately-logged event. `PipelineResult(frame,
+completed_stage, success, error)` wraps (never replaces) a
+`RuntimeFrame` — `frame` is the *last successfully-produced* frame, not
+whatever the stopping stage returned (`None`) or raised, so a short
+circuit or an unexpected exception still reports everything every
+earlier stage already enriched the frame with, not nothing.
+
+`compose_pipeline` gains two new, optional, keyword-only parameters:
+`stage_names: Sequence[str]` (must have exactly `len(stages) + 1`
+entries if given, validated eagerly at composition time, not on the
+first bar) and `on_result: Callable[[PipelineResult], None] | None`.
+Both default to no-ops — `stage_names` omitted falls back to positional
+names (`stage_0`, `stage_1`, ...), `on_result` omitted means nothing is
+ever called — so every `build_*_loop` before Phase G is completely
+unaffected; none of them pass either parameter, and none needed to
+change. `build_execution_loop` is the one call site that supplies both:
+`_EXECUTION_PIPELINE_STAGE_NAMES = ("feature", "regime", "strategy",
+"orchestration", "risk", "execution", "broker_submission")`, and a new
+`on_result: ResultSink | None = None` parameter of its own (same DI
+convention as every other dependency here) defaulting to
+`_log_pipeline_result`, a terminal, one-event-per-bar structured log
+(`pipeline_completed`/`pipeline_stopped`/`pipeline_stage_raised`)
+distinct from — and in addition to — each stage's own per-stage
+logging.
+
+One deliberate departure from `compose_pipeline`'s original "no
+internal try/except, `MarketDataLoop` is the only safety net" design
+(ADR-031): a stage raising is now caught *for reporting purposes only*,
+building a `PipelineResult(success=False, error=str(exc))` from the
+frame going into that stage, calling `on_result`, and then
+**re-raising the exact same exception** — `MarketDataLoop._poll_symbol`'s
+own wrapper still catches and logs it exactly as before, so the actual
+error-handling contract is unchanged; this only adds a chance to
+observe the failure before it propagates. `PipelineResult` is a
+reporting hook, not a second error-handling layer.
+
 ## Consequences
 
 - The runtime now runs genuinely end to end: `MarketDataLoop ->
@@ -158,15 +199,12 @@ None`, `broker_submission_result: BrokerSubmissionResult | None = None`,
   authorized, is consuming `BrokerSubmissionResult`/`broker_order_id`
   to poll or stream fills and reconcile positions; this ADR does not
   design that.
-- A `PipelineResult(frame, stage, success/error)` wrapper — suggested as
-  a softer recommendation ("without changing any of the domain
-  contracts or `RuntimeFrame` itself") for cleaner logging/metrics/
-  replay — is deliberately **not** introduced in this phase. Every
-  emitter already logs its own structured success/failure event and
-  records its own metrics; no caller in this codebase yet needs a
-  uniform cross-stage result object, and building one now would be
-  designing ahead of a demonstrated need. Worth revisiting once a real
-  consumer (e.g. a replay/observability tool spanning stages) exists.
+- `app.pipeline.PipelineResult`/`compose_pipeline`'s `stage_names`/
+  `on_result` parameters give this runtime its first cross-stage
+  reporting channel; `build_execution_loop`'s default `on_result`
+  (`_log_pipeline_result`) is its first real consumer. No domain
+  contract or `RuntimeFrame` itself changed to support this — it is
+  purely additive plumbing in `app.pipeline`/`app.bootstrap`.
 - `app.bootstrap.__version__`/`app.__version__` bumped `0.6.0` ->
   `0.7.0`.
 - No code path in this session invoked real order submission — every
@@ -201,11 +239,18 @@ None`, `broker_submission_result: BrokerSubmissionResult | None = None`,
   additionally gate live trading behind a second, code-level override.
   A loud warning log satisfies "impossible to miss" without adding a
   second gate the instruction didn't ask for.
-- **`PipelineResult` wrapper object, built now** — deferred (see
-  Consequences) rather than rejected outright; the recommendation was
-  explicitly softer ("I would consider") than the two-stage split or
-  the paper-trading default, and no consumer in this codebase needs it
-  yet.
+- **A generic `RuntimeFrame.has(field_name: str) -> bool`-style
+  reporting channel instead of a typed `PipelineResult`** — rejected:
+  ADR-032's Decision 5 already rejected a string-keyed accessor for the
+  same reason (loses static-typing precision); `PipelineResult`'s
+  fields are fully typed for the same reason `require_*` is.
+- **Give `compose_pipeline` its own internal try/except that swallows a
+  raised exception outright, rather than reporting then re-raising** —
+  rejected: that would silently change `MarketDataLoop`'s existing
+  safety-net contract (ADR-031) by moving error-handling responsibility
+  into `compose_pipeline`, duplicating and potentially diverging from
+  `_poll_symbol`'s own catch/log behavior instead of layering
+  observability on top of it.
 - **Introduce fill handling / position reconciliation in this same
   phase, since a submitted order is otherwise an unresolved loose
   end** — rejected per direct instruction: explicitly listed as *not*

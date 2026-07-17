@@ -82,15 +82,45 @@ no new configuration flag.
   paper`/`ALPACA_PAPER` (already default-`True` since Milestone 2)
   rather than inventing a second paper/live flag; logs a loud
   `live_trading_enabled` warning if `credentials.paper` is ever `False`.
-- 27 new tests across `tests/app/` (`test_execution_loop.py`, plus
-  `order_intent`/`broker_submission_result` coverage in `test_frame.py`
-  and `build_execution_loop` tests in `test_bootstrap.py`), bringing
-  `tests/app/` to 161 total (up from 134). Every test uses fakes or
-  `unittest.mock.MagicMock` for `ExecutionService`/`BrokerAdapter` --
-  no real Alpaca client is constructed except in one bootstrap test
-  proving the defaults resolve cleanly, which deliberately never
-  invokes `on_bar`. No real order submission was invoked at any point
-  in this phase's development.
+- `app.pipeline.PipelineResult` -- reviewed and requested before merge.
+  Wraps (never replaces) a `RuntimeFrame` with `completed_stage`,
+  `success`, and `error`, giving one place to observe runtime status
+  instead of correlating each stage's own separately-logged event.
+  `frame` is the last successfully-produced frame -- for a
+  short-circuit or a raised exception, the frame going *into* whichever
+  stage stopped the pipeline, not the `None` it returned or the
+  exception it raised.
+- `app.pipeline.compose_pipeline` gains two new, optional, keyword-only
+  parameters: `stage_names: Sequence[str]` (must have exactly
+  `len(stages) + 1` entries if given, validated eagerly at composition
+  time) and `on_result: Callable[[PipelineResult], None] | None`. Both
+  default to no-ops, so every `build_*_loop` before Phase G is
+  completely unaffected -- none of them pass either parameter. A stage
+  raising is now caught *for reporting purposes only* (reports a
+  `PipelineResult(success=False, error=str(exc))`, then re-raises the
+  exact same exception) -- `MarketDataLoop`'s own existing safety net
+  still catches and logs it exactly as before; this is a reporting
+  hook layered on top, not a second error-handling layer (see ADR-033
+  Decision 5 for the full reasoning).
+- `app.bootstrap.build_execution_loop` gains an `on_result` parameter
+  (same DI convention as every other dependency), defaulting to a new
+  `_log_pipeline_result` -- a terminal, one-event-per-bar structured log
+  (`pipeline_completed`/`pipeline_stopped`/`pipeline_stage_raised`)
+  distinct from, and in addition to, each stage's own per-stage
+  logging. Composed with `_EXECUTION_PIPELINE_STAGE_NAMES = ("feature",
+  "regime", "strategy", "orchestration", "risk", "execution",
+  "broker_submission")` -- the only `compose_pipeline` call site in this
+  runtime that supplies `stage_names`/`on_result` at all.
+- 37 new tests across `tests/app/` (`test_execution_loop.py`; `order_
+  intent`/`broker_submission_result` coverage in `test_frame.py`;
+  `build_execution_loop` tests in `test_bootstrap.py`; `PipelineResult`/
+  `on_result` coverage in `test_pipeline.py` and `test_bootstrap.py`),
+  bringing `tests/app/` to 171 total (up from 134). Every test uses
+  fakes or `unittest.mock.MagicMock` for `ExecutionService`/
+  `BrokerAdapter` -- no real Alpaca client is constructed except in one
+  bootstrap test proving the defaults resolve cleanly, which
+  deliberately never invokes `on_bar`. No real order submission was
+  invoked at any point during development of this phase.
 
 ### Changed
 - `app.__version__` bumped `0.6.0` -> `0.7.0`; `app.bootstrap.
@@ -102,7 +132,7 @@ no new configuration flag.
   `app.orchestration_loop`/`app.strategy_loop`/`app.regime_loop`/
   `app.features_loop`/`app.buffer`/`app.config`/`app.runtime`/
   `app.__init__`/`app.exceptions` are at 100% test coverage;
-  `app.bootstrap` is at 97% (same disclosed real-provider-construction
+  `app.bootstrap` is at 98% (same disclosed real-provider-construction
   lines as Phase A-F); `app.main` is at 43% (same disclosed
   signal-handling gap).
 - `app.main` is *not* updated to run Phase G, for the same reason
@@ -112,10 +142,6 @@ no new configuration flag.
   or memory/experience recording exists anywhere in this runtime yet --
   all explicitly deferred, future work downstream of a stable, observed
   submission path.
-- A `PipelineResult(frame, stage, success/error)` wrapper for
-  cross-stage logging/replay was suggested but deliberately not
-  introduced -- no consumer in this codebase needs it yet; see ADR-033's
-  Alternatives Considered.
 - This completes the 7-phase Trading Validation runtime roadmap
   (Phases A-G). The runtime runs end to end but is not yet the default
   `python -m app` entrypoint, for the reasons above.

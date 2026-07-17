@@ -50,7 +50,15 @@ place (`app.bootstrap`), not spread across every emitter's constructor.
   place rather than each emitter repeating it.
 - `app.pipeline.compose_pipeline` -- folds a first-stage `handle_bar`
   and any number of `handle_frame` stages into one `on_bar`-compatible
-  callable.
+  callable. Optional `stage_names`/`on_result` parameters (used by
+  `build_execution_loop`, no other `build_*_loop`) report one
+  `app.pipeline.PipelineResult` per bar -- which named stage the run
+  reached and whether it succeeded, wrapping (not replacing) the
+  `RuntimeFrame` itself; omitted, behavior is identical to every
+  earlier phase.
+- `app.pipeline.PipelineResult` -- `frame`/`completed_stage`/`success`/
+  `error`, the optional structured-status counterpart to
+  `compose_pipeline`'s `on_result` hook.
 - `app.config.MarketDataLoopConfig`/`FeatureLoopConfig`/
   `RegimeLoopConfig` -- which symbols, how often, how much history to
   retain at each layer.
@@ -126,7 +134,7 @@ from app.execution_loop import BrokerSubmissionEmitter, ExecutionEmitter
 from app.features_loop import FeatureVectorEmitter
 from app.frame import RuntimeFrame
 from app.orchestration_loop import OrchestrationEmitter
-from app.pipeline import compose_pipeline
+from app.pipeline import PipelineResult, compose_pipeline
 from app.regime_loop import RegimeEmitter
 from app.risk_loop import RiskEmitter
 from app.runtime import MarketDataLoop
@@ -143,6 +151,7 @@ __all__ = [
     "MarketDataLoop",
     "MarketDataLoopConfig",
     "OrchestrationEmitter",
+    "PipelineResult",
     "RegimeEmitter",
     "RegimeLoopConfig",
     "RiskEmitter",

@@ -38,7 +38,7 @@ from app.orchestration_loop import (
     NewsSignalProvider,
     OrchestrationEmitter,
 )
-from app.pipeline import compose_pipeline
+from app.pipeline import PipelineResult, ResultSink, compose_pipeline
 from app.regime_loop import RegimeEmitter
 from app.risk_loop import AccountStateProvider, PortfolioStateProvider, RiskEmitter
 from app.runtime import BarCallback, MarketDataLoop
@@ -566,6 +566,47 @@ def build_risk_loop(
     )
 
 
+_EXECUTION_PIPELINE_STAGE_NAMES = (
+    "feature",
+    "regime",
+    "strategy",
+    "orchestration",
+    "risk",
+    "execution",
+    "broker_submission",
+)
+
+
+def _log_pipeline_result(result: PipelineResult) -> None:
+    """Default `on_result` sink for `build_execution_loop` -- a terminal,
+    one-event-per-bar summary of how far the pipeline got, distinct from
+    (and in addition to) each stage's own per-stage structured logging.
+    Overridable via `build_execution_loop`'s own `on_result` parameter,
+    same DI convention as every other dependency in this module.
+    """
+    symbol = result.frame.bar.symbol if result.frame is not None else None
+    if result.error is not None:
+        logger.warning(
+            "pipeline stage raised",
+            extra={
+                "event": "pipeline_stage_raised",
+                "completed_stage": result.completed_stage,
+                "symbol": symbol,
+                "error": result.error,
+            },
+        )
+        return
+    logger.info(
+        "pipeline result",
+        extra={
+            "event": "pipeline_completed" if result.success else "pipeline_stopped",
+            "completed_stage": result.completed_stage,
+            "symbol": symbol,
+            "success": result.success,
+        },
+    )
+
+
 def build_execution_loop(
     config: RegimeLoopConfig,
     regime_service: RegimeService,
@@ -583,6 +624,7 @@ def build_execution_loop(
     execution_config: ExecutionServiceConfig | None = None,
     broker_adapter: BrokerAdapter | None = None,
     broker_retry_policy: RetryPolicy = DEFAULT_BROKER_RETRY_POLICY,
+    on_result: ResultSink | None = None,
     feed: DataFeed = DataFeed.IEX,
     provider: HistoricalDataProvider | None = None,
 ) -> tuple[
@@ -624,6 +666,15 @@ def build_execution_loop(
     2) -- so this runtime is paper-safe by default with no new flag to
     misconfigure; enabling live trading requires an explicit
     `ALPACA_PAPER=false` in the environment, never a code change here.
+
+    `on_result`, if given, receives one `app.pipeline.PipelineResult`
+    per bar processed -- which named stage the run reached and whether
+    it succeeded, wrapping (not replacing) the `RuntimeFrame` itself.
+    Defaults to `_log_pipeline_result`, a terminal, one-event-per-bar
+    structured log distinct from each stage's own per-stage logging;
+    this is this runtime's only pipeline composed with named stages and
+    a result sink at all -- every earlier `build_*_loop` still composes
+    with `compose_pipeline`'s bare positional-args form, unchanged.
     """
     environment = Settings().environment
     require_valid_runtime(
@@ -665,6 +716,8 @@ def build_execution_loop(
             risk_emitter.handle_frame,
             execution_emitter.handle_frame,
             broker_emitter.handle_frame,
+            stage_names=_EXECUTION_PIPELINE_STAGE_NAMES,
+            on_result=on_result or _log_pipeline_result,
         ),
         extra_checks=[
             *feature_checks,
