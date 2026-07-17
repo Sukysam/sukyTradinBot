@@ -8,6 +8,8 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from app.frame import RuntimeFrame
+from execution.broker_adapter import BrokerSubmissionResult
+from execution.models import OrderIntent, OrderSide, OrderType, TimeInForce
 from features.feature_vector import FeatureVector, Provenance
 from hmm.models import RegimeState
 from market_data.models import Bar, Timeframe
@@ -107,6 +109,30 @@ def _execution_decision() -> ExecutionDecision:
         strategy_reference=_strategy_decision(),
         metadata={},
     )
+
+
+def _order_intent() -> OrderIntent:
+    decision = _execution_decision()
+    return OrderIntent(
+        timestamp=T0,
+        symbol="AAPL",
+        side=OrderSide.BUY,
+        quantity=10,
+        order_type=OrderType.MARKET,
+        limit_price=None,
+        time_in_force=TimeInForce.DAY,
+        reference_price=100.0,
+        stop_loss=95.0,
+        take_profit=None,
+        idempotency_key="key-1",
+        reasoning="test reasoning",
+        execution_reference=decision,
+        metadata={},
+    )
+
+
+def _broker_submission_result() -> BrokerSubmissionResult:
+    return BrokerSubmissionResult(submitted=True, broker_order_id="order-1")
 
 
 class TestRuntimeFrame:
@@ -270,3 +296,96 @@ class TestRuntimeFrame:
         frame = RuntimeFrame(bar=_bar())
         with pytest.raises(ValueError, match="execution_decision"):
             frame.require_execution_decision()
+
+    def test_rejects_order_intent_without_execution_decision(self) -> None:
+        with pytest.raises(ValueError, match="execution_decision"):
+            RuntimeFrame(
+                bar=_bar(),
+                feature_vector=_feature_vector(),
+                regime_state=_regime_state(),
+                strategy_decision=_strategy_decision(),
+                final_decision=_final_decision(),
+                order_intent=_order_intent(),
+            )
+
+    def test_with_order_intent_enriches_without_mutating_original(self) -> None:
+        frame = RuntimeFrame(
+            bar=_bar(),
+            feature_vector=_feature_vector(),
+            regime_state=_regime_state(),
+            strategy_decision=_strategy_decision(),
+            final_decision=_final_decision(),
+            execution_decision=_execution_decision(),
+        )
+        intent = _order_intent()
+        enriched = frame.with_order_intent(intent)
+
+        assert frame.order_intent is None
+        assert enriched.order_intent is intent
+        assert enriched.execution_decision == frame.execution_decision
+
+    def test_require_order_intent_returns_the_value_when_present(self) -> None:
+        intent = _order_intent()
+        frame = RuntimeFrame(
+            bar=_bar(),
+            feature_vector=_feature_vector(),
+            regime_state=_regime_state(),
+            strategy_decision=_strategy_decision(),
+            final_decision=_final_decision(),
+            execution_decision=_execution_decision(),
+            order_intent=intent,
+        )
+        assert frame.require_order_intent() is intent
+
+    def test_require_order_intent_raises_when_absent(self) -> None:
+        frame = RuntimeFrame(bar=_bar())
+        with pytest.raises(ValueError, match="order_intent"):
+            frame.require_order_intent()
+
+    def test_rejects_broker_submission_result_without_order_intent(self) -> None:
+        with pytest.raises(ValueError, match="order_intent"):
+            RuntimeFrame(
+                bar=_bar(),
+                feature_vector=_feature_vector(),
+                regime_state=_regime_state(),
+                strategy_decision=_strategy_decision(),
+                final_decision=_final_decision(),
+                execution_decision=_execution_decision(),
+                broker_submission_result=_broker_submission_result(),
+            )
+
+    def test_with_broker_submission_result_enriches_without_mutating_original(self) -> None:
+        frame = RuntimeFrame(
+            bar=_bar(),
+            feature_vector=_feature_vector(),
+            regime_state=_regime_state(),
+            strategy_decision=_strategy_decision(),
+            final_decision=_final_decision(),
+            execution_decision=_execution_decision(),
+            order_intent=_order_intent(),
+        )
+        result = _broker_submission_result()
+        enriched = frame.with_broker_submission_result(result)
+
+        assert frame.broker_submission_result is None
+        assert enriched.broker_submission_result is result
+        assert enriched.order_intent == frame.order_intent
+
+    def test_require_broker_submission_result_returns_the_value_when_present(self) -> None:
+        result = _broker_submission_result()
+        frame = RuntimeFrame(
+            bar=_bar(),
+            feature_vector=_feature_vector(),
+            regime_state=_regime_state(),
+            strategy_decision=_strategy_decision(),
+            final_decision=_final_decision(),
+            execution_decision=_execution_decision(),
+            order_intent=_order_intent(),
+            broker_submission_result=result,
+        )
+        assert frame.require_broker_submission_result() is result
+
+    def test_require_broker_submission_result_raises_when_absent(self) -> None:
+        frame = RuntimeFrame(bar=_bar())
+        with pytest.raises(ValueError, match="broker_submission_result"):
+            frame.require_broker_submission_result()

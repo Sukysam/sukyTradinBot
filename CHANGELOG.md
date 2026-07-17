@@ -21,6 +21,105 @@ and has no entry below. See [PROJECT_STATUS.md](PROJECT_STATUS.md)'s
 "Release Milestones" section for the full grouping and what each
 umbrella tag actually points at.
 
+## Unreleased - Runtime Phase G: Paper Execution (2026-07-17, no tag)
+
+Seventh and final post-`v2.0.0` runtime phase. Wires `ExecutionDecision`s
+to `ExecutionService`/`BrokerAdapter`, so the runtime builds an
+`OrderIntent` and submits it to a broker -- the runtime now runs
+genuinely end to end, from a bare `Bar` to a submitted (or
+broker-rejected) order. Design and implementation recorded together in
+ADR-033, which also documents why this is the first phase built as two
+deliberately separate stages and why paper trading is the default with
+no new configuration flag.
+
+### Added
+- `app.execution_loop.ExecutionEmitter` -- `handle_frame(frame)` calls
+  `frame.require_execution_decision()`, fetches `PortfolioState` from an
+  injected `portfolio_state_provider`, calls `ExecutionService.decide`,
+  logs one `order_intent_emitted` event per success (symbol, timestamp,
+  side, quantity, order_type, idempotency_key, latency), and records
+  `ops.metrics.MetricsRegistry`'s sixth real production metrics
+  (`order_intents_emitted_total` counter, `order_intent_latency_seconds`
+  gauge, `order_intent_errors_total` counter). An unapproved decision
+  producing no `OrderIntent` is logged as an ordinary, expected outcome
+  (`order_intent_not_built`), not a failure. A failure
+  (`execution.exceptions.ExecutionError` or the bare `ValueError`
+  `OrderBuilder.build` itself raises) is caught and logged
+  (`order_intent_failed`), never propagated. Never imports or calls
+  anything under `execution.broker_adapter`/`execution.retry`.
+- `app.execution_loop.BrokerSubmissionEmitter` -- the only stage in this
+  runtime allowed to talk to a broker. `handle_frame(frame)` calls
+  `frame.require_order_intent()`, submits via `execution.retry.
+  submit_with_retry` (never `broker_adapter.submit_order` directly),
+  logs `broker_submission_accepted`/`broker_submission_rejected`
+  depending on the result (both enrich the frame -- a broker rejection
+  is a legitimate outcome, not a stage failure), and records
+  `ops.metrics.MetricsRegistry`'s seventh real production metrics
+  (`broker_submissions_accepted_total`/`broker_submissions_rejected_total`
+  counters, `broker_submission_latency_seconds` gauge,
+  `broker_submission_errors_total` counter for the last-resort
+  unexpected-exception path).
+- `app.frame.RuntimeFrame` gains `order_intent: OrderIntent | None` and
+  `broker_submission_result: BrokerSubmissionResult | None` fields,
+  `with_order_intent`/`with_broker_submission_result`,
+  `require_order_intent`/`require_broker_submission_result`, and the
+  enrichment-order invariant extended (`order_intent` requires
+  `execution_decision`; `broker_submission_result` requires
+  `order_intent`).
+- `app.bootstrap.build_execution_loop` -- Phase G's composition root:
+  the full A-G pipeline composed via `compose_pipeline`. Resolves one
+  `HistoricalDataProvider` shared between `ExecutionService.default(...)`
+  and the polling loop (avoiding two independent rate limiters against
+  the same Alpaca account); validates secrets up front, before
+  constructing any default provider/broker adapter, mirroring
+  `build_market_data_loop`'s own ordering. `execution_service` defaults
+  to `ExecutionService.default(...)` (no trained model needed, same
+  category as Phase F's `risk_service` default); `broker_adapter`
+  defaults to a real `AlpacaBrokerAdapter` via the new
+  `_default_broker_adapter()`.
+- `app.bootstrap._default_broker_adapter()` -- constructs the default
+  `AlpacaBrokerAdapter`, reusing `market_data.auth.AlpacaCredentials.
+  paper`/`ALPACA_PAPER` (already default-`True` since Milestone 2)
+  rather than inventing a second paper/live flag; logs a loud
+  `live_trading_enabled` warning if `credentials.paper` is ever `False`.
+- 27 new tests across `tests/app/` (`test_execution_loop.py`, plus
+  `order_intent`/`broker_submission_result` coverage in `test_frame.py`
+  and `build_execution_loop` tests in `test_bootstrap.py`), bringing
+  `tests/app/` to 161 total (up from 134). Every test uses fakes or
+  `unittest.mock.MagicMock` for `ExecutionService`/`BrokerAdapter` --
+  no real Alpaca client is constructed except in one bootstrap test
+  proving the defaults resolve cleanly, which deliberately never
+  invokes `on_bar`. No real order submission was invoked at any point
+  in this phase's development.
+
+### Changed
+- `app.__version__` bumped `0.6.0` -> `0.7.0`; `app.bootstrap.
+  __version__` likewise bumped `0.6.0` -> `0.7.0`.
+- Nothing in Phase A-F's tested public behavior changed.
+
+### Known limitations
+- `app.frame`/`app.execution_loop`/`app.risk_loop`/`app.pipeline`/
+  `app.orchestration_loop`/`app.strategy_loop`/`app.regime_loop`/
+  `app.features_loop`/`app.buffer`/`app.config`/`app.runtime`/
+  `app.__init__`/`app.exceptions` are at 100% test coverage;
+  `app.bootstrap` is at 97% (same disclosed real-provider-construction
+  lines as Phase A-F); `app.main` is at 43% (same disclosed
+  signal-handling gap).
+- `app.main` is *not* updated to run Phase G, for the same reason
+  Phase C-F weren't wired in: no trained `RegimeService` or
+  deliberately-configured `StrategyRegistry` exists to default to.
+- No fill handling, trade lifecycle tracking, position reconciliation,
+  or memory/experience recording exists anywhere in this runtime yet --
+  all explicitly deferred, future work downstream of a stable, observed
+  submission path.
+- A `PipelineResult(frame, stage, success/error)` wrapper for
+  cross-stage logging/replay was suggested but deliberately not
+  introduced -- no consumer in this codebase needs it yet; see ADR-033's
+  Alternatives Considered.
+- This completes the 7-phase Trading Validation runtime roadmap
+  (Phases A-G). The runtime runs end to end but is not yet the default
+  `python -m app` entrypoint, for the reasons above.
+
 ## Unreleased - Runtime Phase F: Risk Management (2026-07-16, no tag)
 
 Sixth of seven post-`v2.0.0` runtime phases. Wires `FinalDecision`s to

@@ -17,11 +17,14 @@ comparing callable identity.
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from unittest.mock import MagicMock
 
 import pytest
 
 from app.bootstrap import (
+    build_execution_loop,
     build_feature_loop,
     build_market_data_loop,
     build_orchestration_loop,
@@ -32,12 +35,18 @@ from app.bootstrap import (
 )
 from app.config import FeatureLoopConfig, MarketDataLoopConfig, RegimeLoopConfig
 from app.exceptions import GitCommitUnavailableError
+from app.execution_loop import BrokerSubmissionEmitter, ExecutionEmitter
 from app.features_loop import FeatureVectorEmitter
 from app.orchestration_loop import OrchestrationEmitter
 from app.regime_loop import RegimeEmitter
 from app.risk_loop import RiskEmitter
 from app.runtime import MarketDataLoop
 from app.strategy_loop import StrategyEmitter
+from execution.broker_adapter import BrokerSubmissionResult
+from execution.execution_service import ExecutionService
+from execution.models import ExecutionContext, FeatureSnapshot
+from execution.order_builder import OrderBuilder
+from execution.stop_loss import ATRStopPolicy
 from features.feature_vector import FeatureVector
 from hmm.models import RegimeState
 from market_data.errors import ProviderConnectionError
@@ -116,7 +125,7 @@ class TestBuildMarketDataLoop:
         loop, runtime_context = build_market_data_loop(_config(), provider=_FakeProvider())
         assert isinstance(loop, MarketDataLoop)
         assert isinstance(runtime_context, RuntimeContext)
-        assert runtime_context.platform_info.version == "0.6.0"
+        assert runtime_context.platform_info.version == "0.7.0"
 
     def test_raises_runtime_validation_error_when_secret_missing(
         self, monkeypatch: pytest.MonkeyPatch
@@ -148,7 +157,7 @@ class TestBuildFeatureLoop:
         assert isinstance(loop, MarketDataLoop)
         assert isinstance(runtime_context, RuntimeContext)
         assert isinstance(emitter, FeatureVectorEmitter)
-        assert runtime_context.platform_info.version == "0.6.0"
+        assert runtime_context.platform_info.version == "0.7.0"
 
     def test_on_bar_drives_the_emitter(self) -> None:
         loop, _, emitter = build_feature_loop(_feature_config(), provider=_FakeProvider())
@@ -211,7 +220,7 @@ class TestBuildRegimeLoop:
         assert isinstance(runtime_context, RuntimeContext)
         assert isinstance(feature_emitter, FeatureVectorEmitter)
         assert isinstance(regime_emitter, RegimeEmitter)
-        assert runtime_context.platform_info.version == "0.6.0"
+        assert runtime_context.platform_info.version == "0.7.0"
 
     def test_on_bar_drives_both_emitters(self) -> None:
         loop, _, feature_emitter, regime_emitter = build_regime_loop(
@@ -275,7 +284,7 @@ class TestBuildStrategyLoop:
         assert isinstance(feature_emitter, FeatureVectorEmitter)
         assert isinstance(regime_emitter, RegimeEmitter)
         assert isinstance(strategy_emitter, StrategyEmitter)
-        assert runtime_context.platform_info.version == "0.6.0"
+        assert runtime_context.platform_info.version == "0.7.0"
 
     def test_on_bar_drives_all_three_emitters(self) -> None:
         loop, _, feature_emitter, regime_emitter, strategy_emitter = build_strategy_loop(
@@ -361,7 +370,7 @@ class TestBuildOrchestrationLoop:
         assert isinstance(regime_emitter, RegimeEmitter)
         assert isinstance(strategy_emitter, StrategyEmitter)
         assert isinstance(orchestration_emitter, OrchestrationEmitter)
-        assert runtime_context.platform_info.version == "0.6.0"
+        assert runtime_context.platform_info.version == "0.7.0"
 
     def test_on_bar_drives_all_four_emitters(self) -> None:
         loop, _, feature_emitter, regime_emitter, strategy_emitter, orchestration_emitter = (
@@ -477,7 +486,7 @@ class TestBuildRiskLoop:
         assert isinstance(strategy_emitter, StrategyEmitter)
         assert isinstance(orchestration_emitter, OrchestrationEmitter)
         assert isinstance(risk_emitter, RiskEmitter)
-        assert runtime_context.platform_info.version == "0.6.0"
+        assert runtime_context.platform_info.version == "0.7.0"
 
     def test_on_bar_drives_all_five_emitters(self) -> None:
         (
@@ -563,5 +572,199 @@ class TestBuildRiskLoop:
                 _strategy_registry(populated=False),
                 _portfolio_state,
                 _account_state,
+                provider=_FakeProvider(),
+            )
+
+
+@dataclass(frozen=True)
+class _FakeMarketSnapshotProvider:
+    context: ExecutionContext
+
+    def get_snapshot(self, symbol: str) -> ExecutionContext:
+        return self.context
+
+
+@dataclass(frozen=True)
+class _FakeFeatureSnapshotProvider:
+    snapshot: FeatureSnapshot
+
+    def get_latest(self, symbol: str) -> FeatureSnapshot:
+        return self.snapshot
+
+
+def _fake_execution_service() -> ExecutionService:
+    # Never hits the network -- fake market/feature snapshot providers,
+    # mirroring tests/execution/test_execution_service.py's own
+    # convention. Reference price/ATR chosen only to guarantee a
+    # non-degenerate ATR-derived stop, matching the other execution
+    # fixtures in this suite.
+    market_provider = _FakeMarketSnapshotProvider(
+        ExecutionContext(
+            symbol="AAPL",
+            timestamp=T0,
+            reference_price=100.0,
+            bid=None,
+            ask=None,
+            spread=None,
+            tick_size=0.01,
+            price_source="bar_close",
+        )
+    )
+    feature_provider = _FakeFeatureSnapshotProvider(
+        FeatureSnapshot(symbol="AAPL", timestamp=T0, atr_14=2.0, realized_volatility_20=0.02)
+    )
+    return ExecutionService(
+        market_snapshot_provider=market_provider,
+        feature_snapshot_provider=feature_provider,
+        order_builder=OrderBuilder(stop_loss_policy=ATRStopPolicy(atr_multiplier=2.0)),
+    )
+
+
+def _fake_broker_adapter() -> MagicMock:
+    # A MagicMock, never a real AlpacaBrokerAdapter/TradingClient -- this
+    # suite never invokes real order submission, per the constraint
+    # applied throughout this runtime build.
+    adapter = MagicMock()
+    adapter.submit_order.return_value = BrokerSubmissionResult(
+        submitted=True, broker_order_id="order-1"
+    )
+    return adapter
+
+
+class TestBuildExecutionLoop:
+    def test_builds_loop_context_and_all_seven_emitters_when_healthy(self) -> None:
+        (
+            loop,
+            runtime_context,
+            feature_emitter,
+            regime_emitter,
+            strategy_emitter,
+            orchestration_emitter,
+            risk_emitter,
+            execution_emitter,
+            broker_emitter,
+        ) = build_execution_loop(
+            _regime_config(),
+            _FakeRegimeService(),  # type: ignore[arg-type]
+            _strategy_registry(),
+            _portfolio_state,
+            _account_state,
+            execution_service=_fake_execution_service(),
+            broker_adapter=_fake_broker_adapter(),
+            provider=_FakeProvider(),
+        )
+        assert isinstance(loop, MarketDataLoop)
+        assert isinstance(runtime_context, RuntimeContext)
+        assert isinstance(feature_emitter, FeatureVectorEmitter)
+        assert isinstance(regime_emitter, RegimeEmitter)
+        assert isinstance(strategy_emitter, StrategyEmitter)
+        assert isinstance(orchestration_emitter, OrchestrationEmitter)
+        assert isinstance(risk_emitter, RiskEmitter)
+        assert isinstance(execution_emitter, ExecutionEmitter)
+        assert isinstance(broker_emitter, BrokerSubmissionEmitter)
+        assert runtime_context.platform_info.version == "0.7.0"
+
+    def test_on_bar_drives_the_full_pipeline_to_a_broker_submission(self) -> None:
+        (
+            loop,
+            _,
+            feature_emitter,
+            regime_emitter,
+            strategy_emitter,
+            orchestration_emitter,
+            risk_emitter,
+            execution_emitter,
+            broker_emitter,
+        ) = build_execution_loop(
+            _regime_config(),
+            _FakeRegimeService(),  # type: ignore[arg-type]
+            _strategy_registry(),
+            _portfolio_state,
+            _account_state,
+            execution_service=_fake_execution_service(),
+            broker_adapter=_fake_broker_adapter(),
+            provider=_FakeProvider(),
+        )
+        assert loop._on_bar is not None
+        loop._on_bar(_bar())
+        assert feature_emitter.metrics.counter("feature_vectors_emitted_total").value == 1.0
+        assert regime_emitter.metrics.counter("regime_states_emitted_total").value == 1.0
+        assert strategy_emitter.metrics.counter("strategy_decisions_emitted_total").value == 1.0
+        assert orchestration_emitter.metrics.counter("final_decisions_emitted_total").value == 1.0
+        assert risk_emitter.metrics.counter("execution_decisions_emitted_total").value == 1.0
+        assert execution_emitter.metrics.counter("order_intents_emitted_total").value == 1.0
+        assert broker_emitter.metrics.counter("broker_submissions_accepted_total").value == 1.0
+
+    def test_broker_emitter_metrics_start_empty(self) -> None:
+        *_, broker_emitter = build_execution_loop(
+            _regime_config(),
+            _FakeRegimeService(),  # type: ignore[arg-type]
+            _strategy_registry(),
+            _portfolio_state,
+            _account_state,
+            execution_service=_fake_execution_service(),
+            broker_adapter=_fake_broker_adapter(),
+            provider=_FakeProvider(),
+        )
+        assert broker_emitter.metrics.counters == ()
+        assert broker_emitter.metrics.gauges == ()
+
+    def test_execution_service_and_broker_adapter_default_when_not_given(self) -> None:
+        # Neither has a trained-model/domain-mapping dependency like
+        # regime_service/strategy_registry -- both should construct a
+        # working default from just the (test) ALPACA_* env vars. This
+        # only exercises *construction*; on_bar is deliberately never
+        # invoked here, since the default broker_adapter is a real
+        # AlpacaBrokerAdapter and this suite never triggers real order
+        # submission.
+        loop, *_ = build_execution_loop(
+            _regime_config(),
+            _FakeRegimeService(),  # type: ignore[arg-type]
+            _strategy_registry(),
+            _portfolio_state,
+            _account_state,
+            provider=_FakeProvider(),
+        )
+        assert isinstance(loop, MarketDataLoop)
+
+    def test_raises_runtime_validation_error_when_secret_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("ALPACA_API_KEY", raising=False)
+        with pytest.raises(RuntimeValidationError):
+            build_execution_loop(
+                _regime_config(),
+                _FakeRegimeService(),  # type: ignore[arg-type]
+                _strategy_registry(),
+                _portfolio_state,
+                _account_state,
+                execution_service=_fake_execution_service(),
+                broker_adapter=_fake_broker_adapter(),
+                provider=_FakeProvider(),
+            )
+
+    def test_raises_unhealthy_platform_error_when_connectivity_check_fails(self) -> None:
+        with pytest.raises(UnhealthyPlatformError):
+            build_execution_loop(
+                _regime_config(),
+                _FakeRegimeService(),  # type: ignore[arg-type]
+                _strategy_registry(),
+                _portfolio_state,
+                _account_state,
+                execution_service=_fake_execution_service(),
+                broker_adapter=_fake_broker_adapter(),
+                provider=_FakeProvider(healthy=False),
+            )
+
+    def test_raises_unhealthy_platform_error_when_strategy_registry_is_empty(self) -> None:
+        with pytest.raises(UnhealthyPlatformError):
+            build_execution_loop(
+                _regime_config(),
+                _FakeRegimeService(),  # type: ignore[arg-type]
+                _strategy_registry(populated=False),
+                _portfolio_state,
+                _account_state,
+                execution_service=_fake_execution_service(),
+                broker_adapter=_fake_broker_adapter(),
                 provider=_FakeProvider(),
             )

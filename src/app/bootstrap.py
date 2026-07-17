@@ -20,15 +20,18 @@ defined in exactly one place, not duplicated per phase.
 
 from __future__ import annotations
 
+import logging
 import subprocess
 from collections.abc import Sequence
 from datetime import datetime, timedelta, timezone
 
 from alpaca.data.enums import DataFeed
+from alpaca.trading.client import TradingClient
 
 from app.buffer import BarBuffer, FeatureVectorBuffer
 from app.config import FeatureLoopConfig, MarketDataLoopConfig, RegimeLoopConfig
 from app.exceptions import GitCommitUnavailableError
+from app.execution_loop import BrokerSubmissionEmitter, ExecutionEmitter
 from app.features_loop import FeatureVectorEmitter
 from app.orchestration_loop import (
     LearningDecisionProvider,
@@ -41,13 +44,21 @@ from app.risk_loop import AccountStateProvider, PortfolioStateProvider, RiskEmit
 from app.runtime import BarCallback, MarketDataLoop
 from app.strategy_loop import StrategyEmitter
 from common.config import Settings
+from common.retry import RetryPolicy
 from common.time import SystemClock
+from execution.broker_adapter import AlpacaBrokerAdapter
+from execution.config import ExecutionServiceConfig
+from execution.execution_service import ExecutionService
+from execution.interfaces import BrokerAdapter
+from execution.retry import DEFAULT_BROKER_RETRY_POLICY
 from features.registry import DEFAULT_REGISTRY
 from hmm.service import RegimeService
+from market_data.auth import load_alpaca_credentials
 from market_data.interfaces import HistoricalDataProvider
 from market_data.models import Timeframe
 from market_data.providers.alpaca_historical import AlpacaHistoricalProvider
 from ops.checks import (
+    execution_adapter_check,
     feature_registry_check,
     hmm_model_check,
     market_data_check,
@@ -66,13 +77,16 @@ from strategy.config import StrategyEngineConfig
 from strategy.registry import StrategyRegistry
 from strategy.service import StrategyService
 
+logger = logging.getLogger(__name__)
+
 _REQUIRED_SECRETS = ("ALPACA_API_KEY", "ALPACA_SECRET_KEY")
 
 # Bumped 0.1.0 -> 0.2.0 for Phase B (feature pipeline, ADR-028) -> 0.3.0
 # for Phase C (regime detection, ADR-029) -> 0.4.0 for Phase D (strategy
 # engine, ADR-030) -> 0.5.0 for Phase E (signal orchestration, ADR-031)
-# -> 0.6.0 for Phase F (risk management, ADR-032).
-__version__ = "0.6.0"
+# -> 0.6.0 for Phase F (risk management, ADR-032) -> 0.7.0 for Phase G
+# (paper execution, ADR-033).
+__version__ = "0.7.0"
 
 # One day back avoids the free-tier "recent SIP data" restriction the
 # probe would otherwise hit -- see ADR-027 and
@@ -183,6 +197,51 @@ def _build_risk_stage(
     service = risk_service or RiskService.default()
     emitter = RiskEmitter(service, portfolio_state_provider, account_state_provider)
     checks: list[HealthCheck] = [risk_service_check(lambda: len(service.validators) > 0)]
+    return emitter, checks
+
+
+def _default_broker_adapter() -> AlpacaBrokerAdapter:
+    """Constructs the default `AlpacaBrokerAdapter`, reusing
+    `market_data.auth.AlpacaCredentials.paper` (Milestone 2) rather than
+    inventing a second, potentially-divergent paper/live flag --
+    `credentials.paper` already defaults to `True` via the `ALPACA_PAPER`
+    env var, so an unset value never silently means live trading. Client
+    construction and credential handling belong here, not inside
+    `execution.broker_adapter`, per that module's own documented design.
+    """
+    credentials = load_alpaca_credentials()
+    trading_client = TradingClient(
+        api_key=credentials.api_key,
+        secret_key=credentials.secret_key,
+        paper=credentials.paper,
+    )
+    if not credentials.paper:
+        logger.warning(
+            "LIVE TRADING ENABLED -- ALPACA_PAPER is not true. Orders "
+            "submitted by this runtime will be REAL.",
+            extra={"event": "live_trading_enabled"},
+        )
+    return AlpacaBrokerAdapter(trading_client)
+
+
+def _build_execution_stage(
+    historical_provider: HistoricalDataProvider,
+    execution_service: ExecutionService | None,
+    execution_config: ExecutionServiceConfig | None,
+    portfolio_state_provider: PortfolioStateProvider,
+) -> tuple[ExecutionEmitter, list[HealthCheck]]:
+    service = execution_service or ExecutionService.default(historical_provider, execution_config)
+    emitter = ExecutionEmitter(service, portfolio_state_provider)
+    return emitter, []
+
+
+def _build_broker_submission_stage(
+    broker_adapter: BrokerAdapter | None,
+    retry_policy: RetryPolicy,
+) -> tuple[BrokerSubmissionEmitter, list[HealthCheck]]:
+    adapter = broker_adapter or _default_broker_adapter()
+    emitter = BrokerSubmissionEmitter(adapter, retry_policy=retry_policy)
+    checks: list[HealthCheck] = [execution_adapter_check(lambda: adapter is not None)]
     return emitter, checks
 
 
@@ -507,7 +566,131 @@ def build_risk_loop(
     )
 
 
+def build_execution_loop(
+    config: RegimeLoopConfig,
+    regime_service: RegimeService,
+    strategy_registry: StrategyRegistry,
+    portfolio_state_provider: PortfolioStateProvider,
+    account_state_provider: AccountStateProvider,
+    *,
+    risk_service: RiskService | None = None,
+    strategy_config: StrategyEngineConfig | None = None,
+    policy: ArbitrationPolicy | None = None,
+    orchestration_config: OrchestrationConfig | None = None,
+    learning_decision_provider: LearningDecisionProvider | None = None,
+    news_signal_provider: NewsSignalProvider | None = None,
+    execution_service: ExecutionService | None = None,
+    execution_config: ExecutionServiceConfig | None = None,
+    broker_adapter: BrokerAdapter | None = None,
+    broker_retry_policy: RetryPolicy = DEFAULT_BROKER_RETRY_POLICY,
+    feed: DataFeed = DataFeed.IEX,
+    provider: HistoricalDataProvider | None = None,
+) -> tuple[
+    MarketDataLoop,
+    RuntimeContext,
+    FeatureVectorEmitter,
+    RegimeEmitter,
+    StrategyEmitter,
+    OrchestrationEmitter,
+    RiskEmitter,
+    ExecutionEmitter,
+    BrokerSubmissionEmitter,
+]:
+    """Phase G composition root -- the full A-G pipeline: `MarketDataLoop
+    -> FeatureVectorEmitter -> RegimeEmitter -> StrategyEmitter ->
+    OrchestrationEmitter -> RiskEmitter -> ExecutionEmitter ->
+    BrokerSubmissionEmitter`, composed into one `on_bar` callback via
+    `app.pipeline.compose_pipeline`. This is the final phase of the
+    runtime build: the pipeline now runs end-to-end from a bare `Bar`
+    to a submitted (or rejected) order. No fill handling, trade
+    lifecycle tracking, position reconciliation, or memory/experience
+    recording happens here -- all explicitly deferred, future work. See
+    ADR-033.
+
+    `execution_service` defaults to `ExecutionService.default(...)`,
+    built from the SAME resolved `HistoricalDataProvider` this function
+    passes to `build_market_data_loop`, rather than each independently
+    constructing its own -- avoiding two independent rate limiters/retry
+    policies against the same Alpaca account. Secrets are validated
+    explicitly, up front, before that default provider (or the default
+    broker adapter, see `_default_broker_adapter`) is constructed --
+    mirroring `build_market_data_loop`'s own validation, which would
+    otherwise run too late to prevent a less-informative provider-level
+    credential error.
+
+    `broker_adapter` defaults to a real `AlpacaBrokerAdapter`, built
+    from `market_data.auth.AlpacaCredentials.paper` -- which itself
+    already defaults to `True` via the `ALPACA_PAPER` env var (Milestone
+    2) -- so this runtime is paper-safe by default with no new flag to
+    misconfigure; enabling live trading requires an explicit
+    `ALPACA_PAPER=false` in the environment, never a code change here.
+    """
+    environment = Settings().environment
+    require_valid_runtime(
+        validate_runtime(
+            environment=environment,
+            required_secrets=_REQUIRED_SECRETS,
+            secret_source=EnvSecretSource(),
+        )
+    )
+    resolved_provider = provider or AlpacaHistoricalProvider(feed=feed)
+
+    feature_emitter, feature_checks = _build_feature_stage(config.feature_loop)
+    regime_emitter, regime_checks = _build_regime_stage(config, regime_service)
+    strategy_emitter, strategy_checks = _build_strategy_stage(strategy_registry, strategy_config)
+    orchestration_emitter, orchestration_checks = _build_orchestration_stage(
+        policy=policy,
+        config=orchestration_config,
+        learning_decision_provider=learning_decision_provider,
+        news_signal_provider=news_signal_provider,
+    )
+    risk_emitter, risk_checks = _build_risk_stage(
+        risk_service, portfolio_state_provider, account_state_provider
+    )
+    execution_emitter, execution_checks = _build_execution_stage(
+        resolved_provider, execution_service, execution_config, portfolio_state_provider
+    )
+    broker_emitter, broker_checks = _build_broker_submission_stage(
+        broker_adapter, broker_retry_policy
+    )
+    loop, runtime_context = build_market_data_loop(
+        config.feature_loop.market_data,
+        feed=feed,
+        provider=resolved_provider,
+        on_bar=compose_pipeline(
+            feature_emitter.handle_bar,
+            regime_emitter.handle_frame,
+            strategy_emitter.handle_frame,
+            orchestration_emitter.handle_frame,
+            risk_emitter.handle_frame,
+            execution_emitter.handle_frame,
+            broker_emitter.handle_frame,
+        ),
+        extra_checks=[
+            *feature_checks,
+            *regime_checks,
+            *strategy_checks,
+            *orchestration_checks,
+            *risk_checks,
+            *execution_checks,
+            *broker_checks,
+        ],
+    )
+    return (
+        loop,
+        runtime_context,
+        feature_emitter,
+        regime_emitter,
+        strategy_emitter,
+        orchestration_emitter,
+        risk_emitter,
+        execution_emitter,
+        broker_emitter,
+    )
+
+
 __all__ = [
+    "build_execution_loop",
     "build_feature_loop",
     "build_market_data_loop",
     "build_orchestration_loop",

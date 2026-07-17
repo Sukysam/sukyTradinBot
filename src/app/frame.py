@@ -11,8 +11,9 @@ have no clean way to get the earlier objects back alongside whatever
 it produces. See
 docs/engineering-handbook/Architecture/ADR/ADR-030-Runtime-Strategy-Engine-Design.md,
 docs/engineering-handbook/Architecture/ADR/ADR-031-Signal-Orchestration-Design.md,
+docs/engineering-handbook/Architecture/ADR/ADR-032-Runtime-Risk-Management-Design.md,
 and
-docs/engineering-handbook/Architecture/ADR/ADR-032-Runtime-Risk-Management-Design.md.
+docs/engineering-handbook/Architecture/ADR/ADR-033-Runtime-Paper-Execution-Design.md.
 
 Deliberately NOT a `features`/`hmm`/`strategy`-style frozen contract:
 no Standards doc, no contract-freeze ADR, no consumer outside `app`
@@ -39,6 +40,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 
+from execution.broker_adapter import BrokerSubmissionResult
+from execution.models import OrderIntent
 from features.feature_vector import FeatureVector
 from hmm.models import RegimeState
 from market_data.models import Bar
@@ -51,12 +54,13 @@ from strategy.models import StrategyDecision
 class RuntimeFrame:
     """One bar's worth of runtime state, enriched strictly in pipeline
     order (`bar` -> `feature_vector` -> `regime_state` ->
-    `strategy_decision` -> `final_decision` -> `execution_decision`).
-    `__post_init__` enforces that order as an invariant -- a frame
-    can't carry a `regime_state` without a `feature_vector`, and so on
-    down the chain -- catching a wiring bug in `app.bootstrap`
-    immediately rather than letting a later phase silently receive a
-    gap it didn't expect.
+    `strategy_decision` -> `final_decision` -> `execution_decision` ->
+    `order_intent` -> `broker_submission_result`). `__post_init__`
+    enforces that order as an invariant -- a frame can't carry a
+    `regime_state` without a `feature_vector`, and so on down the
+    chain -- catching a wiring bug in `app.bootstrap` immediately
+    rather than letting a later phase silently receive a gap it didn't
+    expect.
     """
 
     bar: Bar
@@ -65,6 +69,8 @@ class RuntimeFrame:
     strategy_decision: StrategyDecision | None = None
     final_decision: FinalDecision | None = None
     execution_decision: ExecutionDecision | None = None
+    order_intent: OrderIntent | None = None
+    broker_submission_result: BrokerSubmissionResult | None = None
 
     def __post_init__(self) -> None:
         if self.regime_state is not None and self.feature_vector is None:
@@ -75,6 +81,10 @@ class RuntimeFrame:
             raise ValueError("RuntimeFrame has final_decision but no strategy_decision")
         if self.execution_decision is not None and self.final_decision is None:
             raise ValueError("RuntimeFrame has execution_decision but no final_decision")
+        if self.order_intent is not None and self.execution_decision is None:
+            raise ValueError("RuntimeFrame has order_intent but no execution_decision")
+        if self.broker_submission_result is not None and self.order_intent is None:
+            raise ValueError("RuntimeFrame has broker_submission_result but no order_intent")
 
     def with_feature_vector(self, feature_vector: FeatureVector) -> RuntimeFrame:
         return replace(self, feature_vector=feature_vector)
@@ -90,6 +100,14 @@ class RuntimeFrame:
 
     def with_execution_decision(self, execution_decision: ExecutionDecision) -> RuntimeFrame:
         return replace(self, execution_decision=execution_decision)
+
+    def with_order_intent(self, order_intent: OrderIntent) -> RuntimeFrame:
+        return replace(self, order_intent=order_intent)
+
+    def with_broker_submission_result(
+        self, broker_submission_result: BrokerSubmissionResult
+    ) -> RuntimeFrame:
+        return replace(self, broker_submission_result=broker_submission_result)
 
     def require_feature_vector(self) -> FeatureVector:
         if self.feature_vector is None:
@@ -115,6 +133,16 @@ class RuntimeFrame:
         if self.execution_decision is None:
             raise ValueError("RuntimeFrame is missing execution_decision")
         return self.execution_decision
+
+    def require_order_intent(self) -> OrderIntent:
+        if self.order_intent is None:
+            raise ValueError("RuntimeFrame is missing order_intent")
+        return self.order_intent
+
+    def require_broker_submission_result(self) -> BrokerSubmissionResult:
+        if self.broker_submission_result is None:
+            raise ValueError("RuntimeFrame is missing broker_submission_result")
+        return self.broker_submission_result
 
 
 __all__ = ["RuntimeFrame"]
