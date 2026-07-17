@@ -12,6 +12,7 @@ from features.feature_vector import FeatureVector, Provenance
 from hmm.models import RegimeState
 from market_data.models import Bar, Timeframe
 from orchestration.models import ArbitrationOutcome, FinalDecision, SignalInput
+from risk.models import DecisionType, ExecutionDecision
 from strategy.models import StrategyDecision
 
 UTC = timezone.utc
@@ -94,6 +95,20 @@ def _final_decision() -> FinalDecision:
     )
 
 
+def _execution_decision() -> ExecutionDecision:
+    return ExecutionDecision(
+        timestamp=T0,
+        symbol="AAPL",
+        approved=True,
+        approved_allocation=0.5,
+        decision_type=DecisionType.APPROVED,
+        risk_adjustments=(),
+        reasoning="test",
+        strategy_reference=_strategy_decision(),
+        metadata={},
+    )
+
+
 class TestRuntimeFrame:
     def test_bar_only_frame_constructs(self) -> None:
         frame = RuntimeFrame(bar=_bar())
@@ -162,3 +177,96 @@ class TestRuntimeFrame:
         assert frame.final_decision is None
         assert enriched.final_decision is decision
         assert enriched.strategy_decision == frame.strategy_decision
+
+    def test_rejects_execution_decision_without_final_decision(self) -> None:
+        with pytest.raises(ValueError, match="final_decision"):
+            RuntimeFrame(
+                bar=_bar(),
+                feature_vector=_feature_vector(),
+                regime_state=_regime_state(),
+                strategy_decision=_strategy_decision(),
+                execution_decision=_execution_decision(),
+            )
+
+    def test_with_execution_decision_enriches_without_mutating_original(self) -> None:
+        frame = RuntimeFrame(
+            bar=_bar(),
+            feature_vector=_feature_vector(),
+            regime_state=_regime_state(),
+            strategy_decision=_strategy_decision(),
+            final_decision=_final_decision(),
+        )
+        decision = _execution_decision()
+        enriched = frame.with_execution_decision(decision)
+
+        assert frame.execution_decision is None
+        assert enriched.execution_decision is decision
+        assert enriched.final_decision == frame.final_decision
+
+    def test_require_feature_vector_returns_the_value_when_present(self) -> None:
+        vector = _feature_vector()
+        frame = RuntimeFrame(bar=_bar(), feature_vector=vector)
+        assert frame.require_feature_vector() is vector
+
+    def test_require_feature_vector_raises_when_absent(self) -> None:
+        frame = RuntimeFrame(bar=_bar())
+        with pytest.raises(ValueError, match="feature_vector"):
+            frame.require_feature_vector()
+
+    def test_require_regime_state_returns_the_value_when_present(self) -> None:
+        state = _regime_state()
+        frame = RuntimeFrame(bar=_bar(), feature_vector=_feature_vector(), regime_state=state)
+        assert frame.require_regime_state() is state
+
+    def test_require_regime_state_raises_when_absent(self) -> None:
+        frame = RuntimeFrame(bar=_bar())
+        with pytest.raises(ValueError, match="regime_state"):
+            frame.require_regime_state()
+
+    def test_require_strategy_decision_returns_the_value_when_present(self) -> None:
+        decision = _strategy_decision()
+        frame = RuntimeFrame(
+            bar=_bar(),
+            feature_vector=_feature_vector(),
+            regime_state=_regime_state(),
+            strategy_decision=decision,
+        )
+        assert frame.require_strategy_decision() is decision
+
+    def test_require_strategy_decision_raises_when_absent(self) -> None:
+        frame = RuntimeFrame(bar=_bar())
+        with pytest.raises(ValueError, match="strategy_decision"):
+            frame.require_strategy_decision()
+
+    def test_require_final_decision_returns_the_value_when_present(self) -> None:
+        decision = _final_decision()
+        frame = RuntimeFrame(
+            bar=_bar(),
+            feature_vector=_feature_vector(),
+            regime_state=_regime_state(),
+            strategy_decision=_strategy_decision(),
+            final_decision=decision,
+        )
+        assert frame.require_final_decision() is decision
+
+    def test_require_final_decision_raises_when_absent(self) -> None:
+        frame = RuntimeFrame(bar=_bar())
+        with pytest.raises(ValueError, match="final_decision"):
+            frame.require_final_decision()
+
+    def test_require_execution_decision_returns_the_value_when_present(self) -> None:
+        decision = _execution_decision()
+        frame = RuntimeFrame(
+            bar=_bar(),
+            feature_vector=_feature_vector(),
+            regime_state=_regime_state(),
+            strategy_decision=_strategy_decision(),
+            final_decision=_final_decision(),
+            execution_decision=decision,
+        )
+        assert frame.require_execution_decision() is decision
+
+    def test_require_execution_decision_raises_when_absent(self) -> None:
+        frame = RuntimeFrame(bar=_bar())
+        with pytest.raises(ValueError, match="execution_decision"):
+            frame.require_execution_decision()

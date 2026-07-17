@@ -26,6 +26,7 @@ from app.bootstrap import (
     build_market_data_loop,
     build_orchestration_loop,
     build_regime_loop,
+    build_risk_loop,
     build_strategy_loop,
     current_git_commit,
 )
@@ -34,6 +35,7 @@ from app.exceptions import GitCommitUnavailableError
 from app.features_loop import FeatureVectorEmitter
 from app.orchestration_loop import OrchestrationEmitter
 from app.regime_loop import RegimeEmitter
+from app.risk_loop import RiskEmitter
 from app.runtime import MarketDataLoop
 from app.strategy_loop import StrategyEmitter
 from features.feature_vector import FeatureVector
@@ -43,6 +45,7 @@ from market_data.models import Bar, Timeframe
 from ops.checks import CallableHealthCheck
 from ops.exceptions import RuntimeValidationError, UnhealthyPlatformError
 from ops.models import RuntimeContext
+from risk.models import AccountState, PortfolioState
 from strategy.models import StrategyDecision
 from strategy.registry import StrategyRegistry
 from strategy.strategies import create_growth_strategy
@@ -113,7 +116,7 @@ class TestBuildMarketDataLoop:
         loop, runtime_context = build_market_data_loop(_config(), provider=_FakeProvider())
         assert isinstance(loop, MarketDataLoop)
         assert isinstance(runtime_context, RuntimeContext)
-        assert runtime_context.platform_info.version == "0.5.0"
+        assert runtime_context.platform_info.version == "0.6.0"
 
     def test_raises_runtime_validation_error_when_secret_missing(
         self, monkeypatch: pytest.MonkeyPatch
@@ -145,7 +148,7 @@ class TestBuildFeatureLoop:
         assert isinstance(loop, MarketDataLoop)
         assert isinstance(runtime_context, RuntimeContext)
         assert isinstance(emitter, FeatureVectorEmitter)
-        assert runtime_context.platform_info.version == "0.5.0"
+        assert runtime_context.platform_info.version == "0.6.0"
 
     def test_on_bar_drives_the_emitter(self) -> None:
         loop, _, emitter = build_feature_loop(_feature_config(), provider=_FakeProvider())
@@ -208,7 +211,7 @@ class TestBuildRegimeLoop:
         assert isinstance(runtime_context, RuntimeContext)
         assert isinstance(feature_emitter, FeatureVectorEmitter)
         assert isinstance(regime_emitter, RegimeEmitter)
-        assert runtime_context.platform_info.version == "0.5.0"
+        assert runtime_context.platform_info.version == "0.6.0"
 
     def test_on_bar_drives_both_emitters(self) -> None:
         loop, _, feature_emitter, regime_emitter = build_regime_loop(
@@ -272,7 +275,7 @@ class TestBuildStrategyLoop:
         assert isinstance(feature_emitter, FeatureVectorEmitter)
         assert isinstance(regime_emitter, RegimeEmitter)
         assert isinstance(strategy_emitter, StrategyEmitter)
-        assert runtime_context.platform_info.version == "0.5.0"
+        assert runtime_context.platform_info.version == "0.6.0"
 
     def test_on_bar_drives_all_three_emitters(self) -> None:
         loop, _, feature_emitter, regime_emitter, strategy_emitter = build_strategy_loop(
@@ -358,7 +361,7 @@ class TestBuildOrchestrationLoop:
         assert isinstance(regime_emitter, RegimeEmitter)
         assert isinstance(strategy_emitter, StrategyEmitter)
         assert isinstance(orchestration_emitter, OrchestrationEmitter)
-        assert runtime_context.platform_info.version == "0.5.0"
+        assert runtime_context.platform_info.version == "0.6.0"
 
     def test_on_bar_drives_all_four_emitters(self) -> None:
         loop, _, feature_emitter, regime_emitter, strategy_emitter, orchestration_emitter = (
@@ -431,5 +434,134 @@ class TestBuildOrchestrationLoop:
                 _regime_config(),
                 _FakeRegimeService(),  # type: ignore[arg-type]
                 _strategy_registry(populated=False),
+                provider=_FakeProvider(),
+            )
+
+
+def _portfolio_state() -> PortfolioState:
+    return PortfolioState(
+        equity=100_000.0,
+        positions=(),
+        equity_start_of_day=100_000.0,
+        equity_start_of_week=100_000.0,
+        equity_peak=100_000.0,
+    )
+
+
+def _account_state() -> AccountState:
+    return AccountState(buying_power=100_000.0)
+
+
+class TestBuildRiskLoop:
+    def test_builds_loop_context_and_all_five_emitters_when_healthy(self) -> None:
+        (
+            loop,
+            runtime_context,
+            feature_emitter,
+            regime_emitter,
+            strategy_emitter,
+            orchestration_emitter,
+            risk_emitter,
+        ) = build_risk_loop(
+            _regime_config(),
+            _FakeRegimeService(),  # type: ignore[arg-type]
+            _strategy_registry(),
+            _portfolio_state,
+            _account_state,
+            provider=_FakeProvider(),
+        )
+        assert isinstance(loop, MarketDataLoop)
+        assert isinstance(runtime_context, RuntimeContext)
+        assert isinstance(feature_emitter, FeatureVectorEmitter)
+        assert isinstance(regime_emitter, RegimeEmitter)
+        assert isinstance(strategy_emitter, StrategyEmitter)
+        assert isinstance(orchestration_emitter, OrchestrationEmitter)
+        assert isinstance(risk_emitter, RiskEmitter)
+        assert runtime_context.platform_info.version == "0.6.0"
+
+    def test_on_bar_drives_all_five_emitters(self) -> None:
+        (
+            loop,
+            _,
+            feature_emitter,
+            regime_emitter,
+            strategy_emitter,
+            orchestration_emitter,
+            risk_emitter,
+        ) = build_risk_loop(
+            _regime_config(),
+            _FakeRegimeService(),  # type: ignore[arg-type]
+            _strategy_registry(),
+            _portfolio_state,
+            _account_state,
+            provider=_FakeProvider(),
+        )
+        assert loop._on_bar is not None
+        loop._on_bar(_bar())
+        assert feature_emitter.metrics.counter("feature_vectors_emitted_total").value == 1.0
+        assert regime_emitter.metrics.counter("regime_states_emitted_total").value == 1.0
+        assert strategy_emitter.metrics.counter("strategy_decisions_emitted_total").value == 1.0
+        assert orchestration_emitter.metrics.counter("final_decisions_emitted_total").value == 1.0
+        assert risk_emitter.metrics.counter("execution_decisions_emitted_total").value == 1.0
+
+    def test_risk_emitter_metrics_start_empty(self) -> None:
+        *_, risk_emitter = build_risk_loop(
+            _regime_config(),
+            _FakeRegimeService(),  # type: ignore[arg-type]
+            _strategy_registry(),
+            _portfolio_state,
+            _account_state,
+            provider=_FakeProvider(),
+        )
+        assert risk_emitter.metrics.counters == ()
+        assert risk_emitter.metrics.gauges == ()
+
+    def test_risk_service_defaults_when_not_given(self) -> None:
+        # RiskService.default() needs no trained model or per-model
+        # domain mapping (unlike regime_service/strategy_registry), so
+        # omitting it should still build a fully working loop.
+        loop, *_ = build_risk_loop(
+            _regime_config(),
+            _FakeRegimeService(),  # type: ignore[arg-type]
+            _strategy_registry(),
+            _portfolio_state,
+            _account_state,
+            provider=_FakeProvider(),
+        )
+        assert isinstance(loop, MarketDataLoop)
+
+    def test_raises_runtime_validation_error_when_secret_missing(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv("ALPACA_API_KEY", raising=False)
+        with pytest.raises(RuntimeValidationError):
+            build_risk_loop(
+                _regime_config(),
+                _FakeRegimeService(),  # type: ignore[arg-type]
+                _strategy_registry(),
+                _portfolio_state,
+                _account_state,
+                provider=_FakeProvider(),
+            )
+
+    def test_raises_unhealthy_platform_error_when_connectivity_check_fails(self) -> None:
+        with pytest.raises(UnhealthyPlatformError):
+            build_risk_loop(
+                _regime_config(),
+                _FakeRegimeService(),  # type: ignore[arg-type]
+                _strategy_registry(),
+                _portfolio_state,
+                _account_state,
+                provider=_FakeProvider(healthy=False),
+            )
+
+    def test_raises_unhealthy_platform_error_when_strategy_registry_is_empty(self) -> None:
+        with pytest.raises(UnhealthyPlatformError):
+            build_risk_loop(
+                _regime_config(),
+                _FakeRegimeService(),  # type: ignore[arg-type]
+                _strategy_registry(populated=False),
+                _portfolio_state,
+                _account_state,
                 provider=_FakeProvider(),
             )

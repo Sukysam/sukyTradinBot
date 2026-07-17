@@ -50,11 +50,8 @@ class StrategyEmitter:
         return self._metrics
 
     def handle_frame(self, frame: RuntimeFrame) -> RuntimeFrame | None:
-        if frame.feature_vector is None or frame.regime_state is None:
-            raise ValueError(
-                "RuntimeFrame reached StrategyEmitter without a feature_vector/regime_state"
-            )
-        feature_vector, regime_state = frame.feature_vector, frame.regime_state
+        feature_vector = frame.require_feature_vector()
+        regime_state = frame.require_regime_state()
 
         started_at = time.perf_counter()
         try:
